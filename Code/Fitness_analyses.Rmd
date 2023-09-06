@@ -1,0 +1,923 @@
+---
+title: "weighted-ERGM"
+author: "Blanca Arroyo-Correa"
+date: "8/8/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages
+
+```{r initialize, message= FALSE, warning=FALSE}
+
+library(plyr)
+library(sand)
+library(robustbase)
+library(ergm) # Will load package 'network' as well.
+library(ergm.count)
+library(igraph)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(maditr)
+library(textshape)
+library(bipartite)
+library(sjstats)
+library(Hmisc)
+library(network)
+library(nlme)
+library(ergm.count)
+library(tibble)
+library(tidyverse)
+library(scales)
+library(ggpubr)
+library(ggthemes)
+library(patchwork)
+library(magrittr)
+library(sf)
+library(ggpubr)
+library(ggthemes)
+library(lmerTest)
+library(lme4)
+library(DHARMa)
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+
+```
+
+## Read fitness data
+
+```{r fitness.data}
+
+### SEED SET
+seedset_1 <- read.csv("Data/Fitness/individual_seed_set_Roff_Clib_Hhal_Lped_Tmas.csv", sep=";")
+seedset_2 <- read.csv("Data/Fitness/individual_seed_set_G_Sgen_Csal_Hcom.csv", sep=";")
+glimpse(seedset_1)
+
+#seedset_1 <- (seedset_1[, 1:7])
+#seedset_1 <- seedset_1[!is.na(seedset_1$N_seeds),]
+#seedset_1[seedset_1 == ''] <- NA
+seedset_1 %<>% select(1:7) %>% 
+  filter(!is.na(N_seeds)) %>% 
+  mutate_if(is.character, list(~na_if(.,""))) %>% 
+  tidyr::fill(c("ID", "Plot", "Plant_sp", "Plant_sp_complete", "Plant_id"), .direction = 'down')
+
+seedset_2 %<>% select(1:7) %>% 
+  filter(!is.na(N_seeds)) %>% 
+  mutate_if(is.character, list(~na_if(.,""))) %>% 
+  tidyr::fill(c("ID", "Plot", "Plant_sp", "Plant_sp_complete", "Plant_id"), .direction = 'down')
+
+
+seedset <- rbind(seedset_1, seedset_2) %>%
+  mutate(N_seeds = as.numeric(N_seeds))
+str(seedset)
+
+
+seedset %<>% select(Plot, Plant_sp, Plant_id, N_fruit, N_seeds) %>%
+  group_by(Plot, Plant_sp, Plant_id) %>%
+  dplyr::summarize(Mean_N_seeds = mean(N_seeds, na.rm=T)) 
+
+str(seedset)
+
+hist(filter(seedset, Plant_sp == "CLIB")$Mean_N_seeds)
+hist(filter(seedset, Plant_sp == "HCOM")$Mean_N_seeds)
+hist(filter(seedset, Plant_sp == "HHAL")$Mean_N_seeds)
+hist(filter(seedset, Plant_sp == "LPED")$Mean_N_seeds)
+hist(filter(seedset, Plant_sp == "ROFF")$Mean_N_seeds)
+hist(filter(seedset, Plant_sp == "SGEN")$Mean_N_seeds)
+hist(filter(seedset, Plant_sp == "TMAS")$Mean_N_seeds)
+
+# AVEL, HPIC
+
+
+### FRUIT SET
+
+fruitset <- read.csv("Data/Fitness/individual_fruit_set_all.csv", sep=";")
+
+fruitset <- fruitset %>% select(Plot, Plant_sp, Plant_id, Branch_inflorescence_id,
+                                  Flowers_produced, Fruits_produced) %>% 
+  mutate(Fruit_set= Fruits_produced/Flowers_produced) %>% 
+  na.omit() %>%
+  group_by(Plot, Plant_sp, Plant_id) %>%
+  dplyr::summarise(Mean_fruit_set = mean(Fruit_set))
+
+fruitset_AVEL <- read.csv("Data/Fitness/fruit_set_inflorescences_Avel.csv", sep=";")
+fruitset_AVEL %<>% filter(Plant_sp =="AVEL") %>% 
+  mutate(Fruit_set= Seeds_produced/Flowers_produced) %>%
+  group_by(Plot, Plant_sp, Plant_id) %>%
+  dplyr::summarise(Mean_fruit_set = mean(Fruit_set))
+
+fruitset %<>% rbind(fruitset_AVEL)
+
+
+## overall fitness
+
+fitness <- full_join(seedset, fruitset, by=c("Plant_id", "Plot", "Plant_sp")) 
+
+fitness %<>% full_join(select(plant.traits, Plant_id, N_flowers), by="Plant_id") %>% 
+  mutate(Mean_N_seeds= ifelse(Plant_sp=="AVEL", Mean_fruit_set, Mean_N_seeds),
+         N_seeds_plant= ifelse(Plant_sp=="AVEL", N_flowers*Mean_fruit_set, N_flowers*Mean_fruit_set*Mean_N_seeds)) %>% na.omit %>% 
+  group_by(Plant_sp) %>% 
+  mutate(N_seeds_sc = range01(N_seeds_plant), Mean_N_seeds_sc = range01(Mean_N_seeds),
+         N_flowers_sc=range01(N_flowers)) # AVEL number of seeds=number of fruits
+
+
+```
+
+
+# PLOT A
+
+```{r uni.model.tests, echo=TRUE, message= FALSE, warning= TRUE}
+
+# A
+sim.A.summ.wide <- sim.A.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+A.summ.wide <- predict.A.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+# B
+sim.B.summ.wide <- sim.B.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+B.summ.wide <- predict.B.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+# C
+sim.C.summ.wide <- sim.C.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+C.summ.wide <- predict.C.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+# D
+sim.D.summ.wide <- sim.D.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+D.summ.wide <- predict.D.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+# E
+sim.E.summ.wide <- sim.E.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+E.summ.wide <- predict.E.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+# F
+sim.F.summ.wide <- sim.F.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+F.summ.wide <- predict.F.summ %>%
+  pivot_wider(names_from = het_con, values_from = mean) %>% 
+  left_join(fitness, by=c("Plant_id_1"="Plant_id"))
+
+
+```
+
+# Fitness ~ weighted + binary model output
+
+```{r}
+
+w.pred.all <- rbind(sim.A.summ.wide, sim.B.summ.wide, sim.C.summ.wide, 
+                    sim.D.summ.wide, sim.E.summ.wide, sim.F.summ.wide)
+b.pred.all <- rbind(A.summ.wide, B.summ.wide, C.summ.wide, 
+                    D.summ.wide, E.summ.wide, F.summ.wide)
+
+
+w.pred.all %<>% mutate(method="weighted")
+b.pred.all %<>% mutate(method="binary")
+
+pred.all <- rbind(b.pred.all, w.pred.all) %>% pivot_wider(names_from = method, values_from = c(con,het))
+
+# AVEL
+seeds1 <- filter(pred.all, N_seeds_sc>0 & Plant_sp=="AVEL")
+lm.all.seeds1 <- lm(log(N_seeds_sc) ~ scale(con_binary) + scale(het_binary) +
+                          scale(con_weighted) + scale(het_weighted) + scale(n_int),
+                        seeds1)
+summary(lm.all.seeds1)
+simulationOutput <- simulateResiduals(fittedModel = lm.all.seeds1)
+plot(simulationOutput)
+
+# CLIB
+seeds2 <- filter(pred.all, N_seeds_sc>0 & Plant_sp=="CLIB")
+lm.all.seeds2 <- lm(log(N_seeds_sc) ~ scale(con_binary) + scale(het_binary) +
+                          scale(con_weighted) + scale(het_weighted) + scale(n_int),
+                        seeds2)
+summary(lm.all.seeds2)
+simulationOutput <- simulateResiduals(fittedModel = lm.all.seeds2)
+plot(simulationOutput)
+
+# HCOM
+seeds3 <- filter(pred.all, N_seeds_sc>0 & Plant_sp=="HCOM")
+lm.all.seeds3 <- lm(log(N_seeds_sc) ~ scale(con_binary) + scale(het_binary) +
+                          scale(con_weighted) + scale(het_weighted) + scale(n_int),
+                        seeds3)
+summary(lm.all.seeds3)
+simulationOutput <- simulateResiduals(fittedModel = lm.all.seeds3)
+plot(simulationOutput)
+
+# HHAL
+seeds4 <- filter(pred.all, N_seeds_sc>0 & Plant_sp=="HHAL")
+lm.all.seeds4 <- lm(log(N_seeds_sc) ~ scale(con_binary) + scale(het_binary) +
+                          scale(con_weighted) + scale(het_weighted) + scale(n_int),
+                        seeds4)
+summary(lm.all.seeds4)
+simulationOutput <- simulateResiduals(fittedModel = lm.all.seeds4)
+plot(simulationOutput)
+
+# LPED
+seeds5 <- filter(pred.all, N_seeds_sc>0 & Plant_sp=="LPED")
+lm.all.seeds5 <- lm(log(N_seeds_sc) ~ scale(con_binary) + scale(het_binary) +
+                          scale(con_weighted) + scale(het_weighted) + scale(n_int),
+                        seeds5)
+summary(lm.all.seeds5)
+simulationOutput <- simulateResiduals(fittedModel = lm.all.seeds5)
+plot(simulationOutput)
+
+# ROFF
+seeds6 <- filter(pred.all, N_seeds_sc>0 & Plant_sp=="ROFF")
+lm.all.seeds6 <- lm(log(N_seeds_sc) ~ scale(con_binary) + scale(het_binary) +
+                          scale(con_weighted) + scale(het_weighted) + scale(n_int),
+                        seeds6)
+summary(lm.all.seeds6)
+simulationOutput <- simulateResiduals(fittedModel = lm.all.seeds6)
+plot(simulationOutput)
+
+# SGEN
+seeds7 <- filter(pred.all, N_seeds_sc>0 & Plant_sp=="SGEN")
+lm.all.seeds7 <- lm(log(N_seeds_sc) ~ scale(con_binary) + scale(het_binary) +
+                          scale(con_weighted) + scale(het_weighted) + scale(n_int), 
+                        seeds7)
+summary(lm.all.seeds7)
+simulationOutput <- simulateResiduals(fittedModel = lm.all.seeds7)
+plot(simulationOutput)
+
+# TMAS
+seeds8 <- filter(pred.all, N_seeds_sc>0 & Plant_sp=="TMAS")
+lm.all.seeds8 <- lm(log(N_seeds_sc) ~ scale(con_binary) + scale(het_binary) +
+                          scale(con_weighted) + scale(het_weighted) + scale(n_int), 
+                        seeds8)
+summary(lm.all.seeds8)
+simulationOutput <- simulateResiduals(fittedModel = lm.all.seeds8)
+plot(simulationOutput)
+
+# Table
+tab_model(lm.all.seeds1, lm.all.seeds2, lm.all.seeds3, 
+          lm.all.seeds4, lm.all.seeds5, lm.all.seeds6,
+          lm.all.seeds7, lm.all.seeds8, show.se=T, show.ci=F,
+          pred.labels = c("Intercept", "Odds of sharing interactions with conspecific plants", 
+                          "Odds of sharing interactions with heterospecific plants", 
+                          "Number of shared interactions with conspecific plants",
+                          "Number of shared interactions with heterospecific plants", 
+                          "Number of visits"),
+  dv.labels = c("Armeria \n velutina", "Cistus \n libanotis", "Halimium \n calycinum", 
+               "Halimium \n halimifolium", "Lavandula \n pedunculata",
+               "Salvia \n rosmarinus", "Stauracanthus \n genistoides","Thymus \n mastichina"),
+  string.pred = "Coefficient",
+  string.p = "P-Value")
+
+# Effects plots
+lm1 <- as.data.frame(coef(summary(lm.all.seeds1))[,c(1:2)]) %>% mutate(Plant_sp="AVEL") %>% rownames_to_column("variable")
+lm2 <- as.data.frame(coef(summary(lm.all.seeds2))[,c(1:2)]) %>% mutate(Plant_sp="CLIB") %>% rownames_to_column("variable")
+lm3 <- as.data.frame(coef(summary(lm.all.seeds3))[,c(1:2)]) %>% mutate(Plant_sp="HCOM") %>% rownames_to_column("variable")
+lm4 <- as.data.frame(coef(summary(lm.all.seeds4))[,c(1:2)]) %>% mutate(Plant_sp="HHAL") %>% rownames_to_column("variable")
+lm5 <- as.data.frame(coef(summary(lm.all.seeds5))[,c(1:2)]) %>% mutate(Plant_sp="LPED") %>% rownames_to_column("variable")
+lm6 <- as.data.frame(coef(summary(lm.all.seeds6))[,c(1:2)]) %>% mutate(Plant_sp="ROFF") %>% rownames_to_column("variable")
+lm7 <- as.data.frame(coef(summary(lm.all.seeds7))[,c(1:2)]) %>% mutate(Plant_sp="SGEN") %>% rownames_to_column("variable")
+lm8 <- as.data.frame(coef(summary(lm.all.seeds8))[,c(1:2)]) %>% mutate(Plant_sp="TMAS") %>% rownames_to_column("variable")
+
+lm.all <- rbind(lm1, lm2, lm3, lm4, lm5, lm6, lm7, lm8) %>% 
+  rename(se=`Std. Error`)
+glimpse(lm.all)
+
+lm.all$con_het <- rep(c("Intercept", "con", "het", "con", "het", "N_int"), 8)
+lm.all$method <- rep(c("a", "binary", "binary", "weighted", "weighted", "a"), 8)
+labs <- c("", "Probability of sharing \n interactions", "Expected number of \ninteractions shared")
+names(labs) <- c("a", "binary", "weighted")
+
+## this is necessary to colour the panel background differently for het and con
+tp1 <- unique(filter(lm.all, Plant_sp %in% c("AVEL", "CLIB", "HCOM", "HHAL"))[,c('method','Plant_sp')])
+tp1$Estimate <- 1
+tp1$het_con <- "het"
+
+tp2 <- unique(filter(lm.all, Plant_sp %in% c("LPED", "ROFF", "SGEN", "TMAS"))[,c('method','Plant_sp')])
+tp2$Estimate <- 1
+tp2$het_con <- "het"
+
+
+
+first.sp <- ggplot(filter(lm.all, Plant_sp %in% c("AVEL", "CLIB", "HCOM", "HHAL"))) + 
+  geom_pointrange(mapping=aes(x=Estimate, y=variable, xmin=Estimate-se, xmax=Estimate+se, color=Plant_sp),
+                  size=0.05) + geom_vline(xintercept =0, linetype="dashed", 
+                color = "grey50", size=0.6) +
+  facet_grid(method ~ Plant_sp, 
+  labeller = labeller(Plant_sp = sp.labs[1:4], method=labs), scales="free_y", space = "free") +
+  scale_color_manual(values=alpha(cols2[1:4], 1),
+                     name = "Plant species", labels = c("Armeria velutina", "Cistus libanotis", 
+                                       "Halimium calycinum", "Halimium halimifolium")) + 
+  theme_base() + theme(
+   plot.background = element_blank(), 
+   strip.background = element_rect(color="white", fill="white", size=1.5), 
+   #strip.text = element_text(face = "italic", size=12),
+   legend.position = "none",
+   strip.text.x = element_text(face = "italic", size=12),
+   strip.text.y = element_blank(),
+   #strip.text.y = element_text(face = "bold", size=10),
+   #strip.text.x = element_blank(),
+   axis.text.x = element_text(size=10, margin = margin(t = 5, r = 0, b = 0, l = 0)),
+   axis.text.y = element_text(size=10, margin = margin(t = 0, r = 5, b = 0, l = 0))) +
+   scale_y_discrete(breaks=c("(Intercept)", "scale(con_binary)", "scale(het_binary)",
+                      "scale(con_weighted)", "scale(het_weighted)", "scale(n_int)"),
+        labels=c("Intercept", "Odds of sharing interactions \nwith conspecifics", 
+                          "Odds of sharing interactions \nwith heterospecifics", 
+                          "Number of shared interactions \nwith conspecifics",
+                          "Number of shared interactions \nwith heterospecifics", 
+                          "Total number of visits")) + 
+  ylab("") + 
+  geom_rect(data = subset(tp1, method == 'weighted'),aes(fill = method),xmin = -Inf,xmax = Inf,
+            ymin = -Inf,ymax = Inf,alpha = 0.15, fill="grey50") 
+
+
+second.sp <- ggplot(filter(lm.all, Plant_sp %in% c("LPED", "ROFF", "SGEN", "TMAS"))) + 
+  geom_pointrange(mapping=aes(x=Estimate, y=variable, xmin=Estimate-se, xmax=Estimate+se, color=Plant_sp),
+                  size=0.05) + geom_vline(xintercept =0, linetype="dashed", 
+                color = "grey50", size=0.6) +
+  facet_grid(method ~ Plant_sp, 
+  labeller = labeller(Plant_sp = sp.labs[6:9], method=labs), scales="free_y", space = "free") +
+  scale_color_manual(values=alpha(cols2[6:9], 1),
+                     name = "Plant species", labels = c("Lavandula pedunculata", "Salvia rosmarinus", 
+                                       "Stauracanthus genistoides", "Thymus mastichina")) + 
+  theme_base() + theme(
+   plot.background = element_blank(), 
+   strip.background = element_rect(color="white", fill="white", size=1.5), 
+   #strip.text = element_text(face = "italic", size=12),
+   legend.position = "none",
+   strip.text.x = element_text(face = "italic", size=12),
+   strip.text.y = element_blank(),
+   #strip.text.y = element_text(face = "bold", size=10),
+   #strip.text.x = element_blank(),
+   axis.text.x = element_text(size=10, margin = margin(t = 5, r = 0, b = 0, l = 0)),
+   axis.text.y = element_text(size=10, margin = margin(t = 0, r = 5, b = 0, l = 0))) +
+   scale_y_discrete(breaks=c("(Intercept)", "scale(con_binary)", "scale(het_binary)",
+                      "scale(con_weighted)", "scale(het_weighted)", "scale(n_int)"),
+        labels=c("Intercept", "Odds of sharing interactions \nwith conspecifics", 
+                          "Odds of sharing interactions \nwith heterospecifics", 
+                          "Number of shared interactions \nwith conspecifics",
+                          "Number of shared interactions \nwith heterospecifics", 
+                          "Total number of visits")) + 
+  ylab("") + 
+  geom_rect(data = subset(tp2, method == 'weighted'),aes(fill = method),xmin = -Inf,xmax = Inf,
+            ymin = -Inf,ymax = Inf,alpha = 0.15, fill="grey50") 
+
+
+first.sp / second.sp + plot_layout(guides = "auto")
+
+# overall
+#tp <- unique(lm.all)[,c('method','Plant_sp')]
+#tp$Estimate <- 1
+#tp$het_con <- "het"
+#
+#ggplot(lm.all) + 
+#  geom_pointrange(mapping=aes(x=Estimate, y=variable, xmin=Estimate-se, xmax=Estimate+se, color=Plant_sp),
+#                  size=0.05) + geom_vline(xintercept =0, linetype="dashed", 
+#                color = "grey50", size=0.6) +
+#  facet_grid(method ~ Plant_sp, 
+#  labeller = labeller(Plant_sp = sp.labs, method=labs), scales="free_y", space = "free") +
+#  scale_color_manual(values=alpha(cols2, 1),
+#                     name = "Plant species", labels = c("Armeria velutina", "Cistus libanotis", 
+#                                       "Halimium calycinum", "Halimium halimifolium",
+#                                       "Lavandula pedunculata", "Salvia rosmarinus", 
+#                                       "Stauracanthus genistoides", "Thymus mastichina")) + 
+#  theme_base() + theme(
+#   plot.background = element_blank(), 
+#   strip.background = element_rect(color="white", fill="white", size=1.5), 
+#   #strip.text = element_text(face = "italic", size=12),
+#   #legend.position = "none",
+#   #strip.text.x = element_text(face = "italic", size=12),
+#   strip.text.y = element_blank(),
+#   #strip.text.y = element_text(face = "bold", size=10),
+#   strip.text.x = element_blank(),
+#   axis.text.x = element_text(size=10, margin = margin(t = 5, r = 0, b = 0, l = 0)),
+#   axis.text.y = element_text(size=10, margin = margin(t = 0, r = 5, b = 0, l = 0))) +
+#   scale_y_discrete(breaks=c("(Intercept)", "scale(con_binary)", "scale(het_binary)",
+#                      "scale(con_weighted)", "scale(het_weighted)", "scale(n_int)"),
+#        labels=c("Intercept", "Probability of sharing interactions \nwith conspecifics", 
+#                          "Probability of sharing interactions \nwith heterospecifics", 
+#                          "Number of shared interactions \nwith conspecifics",
+#                          "Number of shared interactions \nwith heterospecifics", 
+#                          "Total number of visits")) + 
+#  ylab("") + 
+#  geom_rect(data = subset(tp, method == 'weighted'),aes(fill = method),xmin = -Inf,xmax = Inf,
+#            ymin = -Inf,ymax = Inf,alpha = 0.15, fill="grey50") 
+
+
+```
+
+# Z-scores fitness vs combinations of pollinator sharing
+
+```{r}
+# predict
+
+lm.all.seeds3
+
+plot_model(lm.all.seeds4, type = "pred", terms = "con_binary")
+visreg(lm.all.seeds3, "con_binary", line=list(col="black"),
+                             points=list(cex=1))
+visreg(lm.all.seeds3, "het_binary", line=list(col="black"),
+                             points=list(cex=1))
+visreg(lm.all.seeds3, "con_weighted", line=list(col="black"),
+                             points=list(cex=1))
+visreg(lm.all.seeds3, "het_weighted", line=list(col="black"),
+                             points=list(cex=1))
+
+hist(seeds3$N_seeds_sc)
+seeds1$predict <- scale(exp(predict(lm.all.seeds1, newdata=seeds1)))
+seeds2$predict <- scale(exp(predict(lm.all.seeds2, newdata=seeds2)))
+seeds3$predict <- scale(exp(predict(lm.all.seeds3, newdata=seeds3)))
+seeds4$predict <- scale(exp(predict(lm.all.seeds4, newdata=seeds4)))
+seeds5$predict <- scale(exp(predict(lm.all.seeds5, newdata=seeds5)))
+seeds6$predict <- scale(exp(predict(lm.all.seeds6, newdata=seeds6)))
+seeds7$predict <- scale(exp(predict(lm.all.seeds7, newdata=seeds7)))
+seeds8$predict <- scale(exp(predict(lm.all.seeds8, newdata=seeds8)))
+pred.fitness <- rbind(seeds1, seeds2, seeds3, seeds4, seeds5, seeds6, seeds7, seeds8)
+
+com1 <- ggplot(pred.fitness, aes(con_binary, het_binary, size=predict)) + 
+  geom_point(alpha=0.4, aes(colour=Plant_sp)) + 
+  scale_colour_manual(values=cols2, name = "Plant species") +
+  #scale_color_gradient(low="blue", high="red") + 
+  theme_bw() + guides(size="none") +
+  xlab("Odds of sharing interactions with conspecific plants") +
+  ylab("Odds of sharing interactions \nwith heterospecific plants")
+com2 <- ggplot(pred.fitness, aes(con_weighted, het_weighted, size=predict)) + 
+  geom_point(alpha=0.4, aes(colour=Plant_sp)) + 
+  scale_colour_manual(values=cols2, name = "Plant species") +
+  #scale_color_gradient(low="blue", high="red") + 
+  theme_bw() + guides(size="none") +
+  xlab("Number of shared interactions with conspecific plants") +
+  ylab("Number of shared interactions \nwith heterospecific plants")
+com3 <- ggplot(pred.fitness, aes(con_binary, het_weighted, size=predict)) + 
+  geom_point(alpha=0.4, aes(colour=Plant_sp)) + 
+  scale_colour_manual(values=cols2, name = "Plant species") +
+  #scale_color_gradient(low="blue", high="red") + 
+  theme_bw() + guides(size="none") +
+  xlab("Odds of sharing interactions with conspecific plants") +
+  ylab("Number of shared interactions \nwith heterospecific plants")
+com4 <- ggplot(pred.fitness, aes(con_weighted, het_binary, size=predict)) + 
+  geom_point(alpha=0.4, aes(colour=Plant_sp)) + 
+  scale_colour_manual(values=cols2, name = "Plant species") +
+  #scale_color_gradient(low="blue", high="red") + 
+  theme_bw() + guides(size="none") +
+  xlab("Number of shared interactions with conspecific plants") +
+  ylab("Odds of sharing interactions \nwith heterospecific plants")
+com5 <- ggplot(pred.fitness, aes(con_weighted, con_binary, size=predict)) + 
+  geom_point(alpha=0.4, aes(colour=Plant_sp)) + 
+  scale_colour_manual(values=cols2, name = "Plant species", 
+                      labels = c("Armeria velutina", "Cistus libanotis", 
+                                       "Halimium calycinum", "Halimium halimifolium",
+                                       "Lavandula pedunculata", "Salvia rosmarinus", 
+                                       "Stauracanthus genistoides", "Thymus mastichina")) +
+  #scale_color_gradient(low="blue", high="red") + 
+  theme_bw() + guides(size="none") + theme(legend.text = element_text(face="italic")) +
+  xlab("Number of shared interactions with conspecific plants") +
+  ylab("Odds of sharing interactions with conspecific plants")
+com6 <- ggplot(pred.fitness, aes(het_weighted, het_binary, size=predict)) + 
+  geom_point(alpha=0.4, aes(colour=Plant_sp)) + 
+  scale_colour_manual(values=cols2, name = "Plant species", 
+                      labels = c("Armeria velutina", "Cistus libanotis", 
+                                       "Halimium calycinum", "Halimium halimifolium",
+                                       "Lavandula pedunculata", "Salvia rosmarinus", 
+                                       "Stauracanthus genistoides", "Thymus mastichina")) +
+  #scale_color_gradient(low="blue", high="red") + 
+  theme_bw() + guides(size="none") + theme(legend.text = element_text(face="italic")) +
+  xlab("Number of shared interactions with heterospecific plants") +
+  ylab("Odds of sharing interactions with heterospecific plants")
+
+((com1 + com2) / (com3 + com4) / (com5 + com6)) + plot_layout(guides = "collect")
+(com5 + com6) + plot_layout(guides = "collect")
+
+
+# Fig. SX
+
+con.w.con.b <- ggplot(pred.fitness, aes(con_weighted, con_binary, size=n_int, color=Plant_sp)) + 
+  geom_point(alpha=0.7) + 
+  #geom_smooth(method = "lm", se=F, linetype = "dashed") +
+  facet_wrap(~ Plant_sp, nrow=2, scales="free",  
+  labeller = labeller(Plant_sp = sp.labs)) +
+  scale_color_manual(values=alpha(cols2, 0.8), 
+                     name = "Plant species", labels = c("Armeria velutina", "Cistus libanotis", 
+                                       "Halimium calycinum", "Halimium halimifolium", 
+                                       "Lavandula pedunculata", "Salvia rosmarinus", 
+                                       "Stauracanthus genistoides", "Thymus mastichina")) + 
+  theme_base() + theme(text = element_text(size=14), plot.background = element_blank(),
+    strip.background = element_rect(color="white", fill="white", size=1.5), 
+    #strip.text = element_text(face = "italic", size=12),
+    strip.text = element_blank(),
+    #legend.position = "none",
+    legend.text=element_text(face="italic"),
+    axis.title.x = element_text(size=14, margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(size=14, margin = margin(t = 0, r = 10, b = 0, l = 0))) +
+  xlab("Number of shared interactions with conspecific plants") +
+  ylab("Odds of sharing interactions \nwith conspecific plants") +
+  scale_x_log10() + scale_y_log10() +
+  theme(panel.spacing.x = unit(5, "mm")) +guides(size = "none")
+
+
+het.w.het.b <- ggplot(pred.fitness, aes(het_weighted, het_binary, size=n_int, color=Plant_sp)) + 
+  geom_point(alpha=0.7) + 
+  #geom_smooth(method = "lm", se=F, linetype = "dashed") +
+  facet_wrap(~ Plant_sp, nrow=2, scales="free",  
+  labeller = labeller(Plant_sp = sp.labs)) +
+  scale_color_manual(values=alpha(cols2, 0.8), 
+                     name = "Plant species", labels = c("Armeria velutina", "Cistus libanotis", 
+                                       "Halimium calycinum", "Halimium halimifolium", 
+                                       "Lavandula pedunculata", "Salvia rosmarinus", 
+                                       "Stauracanthus genistoides", "Thymus mastichina")) + 
+  theme_base() + theme(text = element_text(size=14), plot.background = element_blank(),
+    strip.background = element_rect(color="white", fill="white", size=1.5), 
+    #strip.text = element_text(face = "italic", size=12),
+    strip.text = element_blank(),
+    #legend.position = "none",
+    legend.text=element_text(face="italic"),
+    axis.title.x = element_text(size=14, margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(size=14, margin = margin(t = 0, r = 10, b = 0, l = 0))) +
+  xlab("Number of shared interactions with heterospecific plants") +
+  ylab("Odds of sharing interactions \nwith heterospecific plants") +
+  scale_x_log10() + scale_y_log10() +
+  theme(panel.spacing.x = unit(5, "mm")) +guides(size = "none")
+
+
+con.w.con.b / het.w.het.b + plot_layout(guides = "collect")
+###################
+
+## Seeds 1
+x1 <- seeds1
+median.con.binary.x1 <- median(x1$con_binary, na.rm=T)
+median.het.binary.x1 <- median(x1$het_binary, na.rm=T)
+median.con.weighted.x1 <- median(x1$con_weighted, na.rm=T)
+median.het.weighted.x1 <- median(x1$het_weighted, na.rm=T)
+
+x1 %<>% mutate(group_b= ifelse(
+  con_binary > median.con.binary.x1 & het_binary > median.het.binary.x1, "1",
+  (ifelse(con_binary > median.con.binary.x1 & het_binary < median.het.binary.x1, "2",
+         ifelse(con_binary < median.con.binary.x1 & het_binary > median.het.binary.x1, "3",
+                "4"))))) %>% mutate(group_w= ifelse(
+  con_weighted > median.con.weighted.x1 & het_weighted > median.het.weighted.x1, "1",
+  (ifelse(con_weighted > median.con.weighted.x1 & het_weighted < median.het.weighted.x1, "2",
+         ifelse(con_weighted < median.con.weighted.x1 & het_weighted > median.het.weighted.x1, "3",
+                "4")))))
+
+## Seeds 2
+x2 <- seeds2
+median.con.binary.x2 <- median(x2$con_binary, na.rm=T)
+median.het.binary.x2 <- median(x2$het_binary, na.rm=T)
+median.con.weighted.x2 <- median(x2$con_weighted, na.rm=T)
+median.het.weighted.x2 <- median(x2$het_weighted, na.rm=T)
+
+x2 %<>% mutate(group_b= ifelse(
+  con_binary > median.con.binary.x2 & het_binary > median.het.binary.x2, "1",
+  (ifelse(con_binary > median.con.binary.x2 & het_binary < median.het.binary.x2, "2",
+         ifelse(con_binary < median.con.binary.x2 & het_binary > median.het.binary.x2, "3",
+                "4"))))) %>% mutate(group_w= ifelse(
+  con_weighted > median.con.weighted.x2 & het_weighted > median.het.weighted.x2, "1",
+  (ifelse(con_weighted > median.con.weighted.x2 & het_weighted < median.het.weighted.x2, "2",
+         ifelse(con_weighted < median.con.weighted.x2 & het_weighted > median.het.weighted.x2, "3",
+                "4")))))
+
+## Seeds 3
+x3 <- seeds3
+median.con.binary.x3 <- median(x3$con_binary, na.rm=T)
+median.het.binary.x3 <- median(x3$het_binary, na.rm=T)
+median.con.weighted.x3 <- median(x3$con_weighted, na.rm=T)
+median.het.weighted.x3 <- median(x3$het_weighted, na.rm=T)
+
+x3 %<>% mutate(group_b= ifelse(
+  con_binary > median.con.binary.x3 & het_binary > median.het.binary.x3, "1",
+  (ifelse(con_binary > median.con.binary.x3 & het_binary < median.het.binary.x3, "2",
+         ifelse(con_binary < median.con.binary.x3 & het_binary > median.het.binary.x3, "3",
+                "4"))))) %>% mutate(group_w= ifelse(
+  con_weighted > median.con.weighted.x3 & het_weighted > median.het.weighted.x3, "1",
+  (ifelse(con_weighted > median.con.weighted.x3 & het_weighted < median.het.weighted.x3, "2",
+         ifelse(con_weighted < median.con.weighted.x3 & het_weighted > median.het.weighted.x3, "3",
+                "4")))))
+
+## Seeds 4
+x4 <- seeds4
+median.con.binary.x4 <- median(x4$con_binary, na.rm=T)
+median.het.binary.x4 <- median(x4$het_binary, na.rm=T)
+median.con.weighted.x4 <- median(x4$con_weighted, na.rm=T)
+median.het.weighted.x4 <- median(x4$het_weighted, na.rm=T)
+
+x4 %<>% mutate(group_b= ifelse(
+  con_binary > median.con.binary.x4 & het_binary > median.het.binary.x4, "1",
+  (ifelse(con_binary > median.con.binary.x4 & het_binary < median.het.binary.x4, "2",
+         ifelse(con_binary < median.con.binary.x4 & het_binary > median.het.binary.x4, "3",
+                "4"))))) %>% mutate(group_w= ifelse(
+  con_weighted > median.con.weighted.x4 & het_weighted > median.het.weighted.x4, "1",
+  (ifelse(con_weighted > median.con.weighted.x4 & het_weighted < median.het.weighted.x4, "2",
+         ifelse(con_weighted < median.con.weighted.x4 & het_weighted > median.het.weighted.x4, "3",
+                "4")))))
+
+## Seeds 5
+x5 <- seeds5
+median.con.binary.x5 <- median(x5$con_binary, na.rm=T)
+median.het.binary.x5 <- median(x5$het_binary, na.rm=T)
+median.con.weighted.x5 <- median(x5$con_weighted, na.rm=T)
+median.het.weighted.x5 <- median(x5$het_weighted, na.rm=T)
+
+x5 %<>% mutate(group_b= ifelse(
+  con_binary > median.con.binary.x5 & het_binary > median.het.binary.x5, "1",
+  (ifelse(con_binary > median.con.binary.x5 & het_binary < median.het.binary.x5, "2",
+         ifelse(con_binary < median.con.binary.x5 & het_binary > median.het.binary.x5, "3",
+                "4"))))) %>% mutate(group_w= ifelse(
+  con_weighted > median.con.weighted.x5 & het_weighted > median.het.weighted.x5, "1",
+  (ifelse(con_weighted > median.con.weighted.x5 & het_weighted < median.het.weighted.x5, "2",
+         ifelse(con_weighted < median.con.weighted.x5 & het_weighted > median.het.weighted.x5, "3",
+                "4")))))
+
+## Seeds 6
+x6 <- seeds6
+median.con.binary.x6 <- median(x6$con_binary, na.rm=T)
+median.het.binary.x6 <- median(x6$het_binary, na.rm=T)
+median.con.weighted.x6 <- median(x6$con_weighted, na.rm=T)
+median.het.weighted.x6 <- median(x6$het_weighted, na.rm=T)
+
+x6 %<>% mutate(group_b= ifelse(
+  con_binary > median.con.binary.x6 & het_binary > median.het.binary.x6, "1",
+  (ifelse(con_binary > median.con.binary.x6 & het_binary < median.het.binary.x6, "2",
+         ifelse(con_binary < median.con.binary.x6 & het_binary > median.het.binary.x6, "3",
+                "4"))))) %>% mutate(group_w= ifelse(
+  con_weighted > median.con.weighted.x6 & het_weighted > median.het.weighted.x6, "1",
+  (ifelse(con_weighted > median.con.weighted.x6 & het_weighted < median.het.weighted.x6, "2",
+         ifelse(con_weighted < median.con.weighted.x6 & het_weighted > median.het.weighted.x6, "3",
+                "4")))))
+
+## Seeds 7
+x7 <- seeds7
+median.con.binary.x7 <- median(x7$con_binary, na.rm=T)
+median.het.binary.x7 <- median(x7$het_binary, na.rm=T)
+median.con.weighted.x7 <- median(x7$con_weighted, na.rm=T)
+median.het.weighted.x7 <- median(x7$het_weighted, na.rm=T)
+
+x7 %<>% mutate(group_b= ifelse(
+  con_binary > median.con.binary.x7 & het_binary > median.het.binary.x7, "1",
+  (ifelse(con_binary > median.con.binary.x7 & het_binary < median.het.binary.x7, "2",
+         ifelse(con_binary < median.con.binary.x7 & het_binary > median.het.binary.x7, "3",
+                "4"))))) %>% mutate(group_w= ifelse(
+  con_weighted > median.con.weighted.x7 & het_weighted > median.het.weighted.x7, "1",
+  (ifelse(con_weighted > median.con.weighted.x7 & het_weighted < median.het.weighted.x7, "2",
+         ifelse(con_weighted < median.con.weighted.x7 & het_weighted > median.het.weighted.x7, "3",
+                "4")))))
+
+## Seeds 7
+x8 <- seeds8
+median.con.binary.x8 <- median(x8$con_binary, na.rm=T)
+median.het.binary.x8 <- median(x8$het_binary, na.rm=T)
+median.con.weighted.x8 <- median(x8$con_weighted, na.rm=T)
+median.het.weighted.x8 <- median(x8$het_weighted, na.rm=T)
+
+x8 %<>% mutate(group_b= ifelse(
+  con_binary > median.con.binary.x8 & het_binary > median.het.binary.x8, "1",
+  (ifelse(con_binary > median.con.binary.x8 & het_binary < median.het.binary.x8, "2",
+         ifelse(con_binary < median.con.binary.x8 & het_binary > median.het.binary.x8, "3",
+                "4"))))) %>% mutate(group_w= ifelse(
+  con_weighted > median.con.weighted.x8 & het_weighted > median.het.weighted.x8, "1",
+  (ifelse(con_weighted > median.con.weighted.x8 & het_weighted < median.het.weighted.x8, "2",
+         ifelse(con_weighted < median.con.weighted.x8 & het_weighted > median.het.weighted.x8, "3",
+                "4")))))
+
+## All species
+
+x.all <- rbind(x1,x2,x3,x4,x5,x6,x7,x8) %>% 
+  filter(!(Plant_sp=="HHAL" & predict>1.5),  
+         !(Plant_sp=="TMAS" & predict>2), !(Plant_sp=="CLIB" & predict>6))
+
+x.all.plot.b <- ggplot(na.omit(x.all), aes(x=group_b, y=predict, 
+                                   size=(n_int), colour=Plant_sp, fill=Plant_sp)) + 
+  geom_hline(yintercept=0, linetype="dashed", color = "grey30", size=0.5) +
+  geom_boxplot(outlier.shape=NA, width=0.5, position = position_dodge(width=0.5), alpha=0.3) + #geom_text(hjust=0, vjust=0) +
+geom_jitter(width = 0.15, alpha = 0.7) +
+theme_linedraw() + facet_grid(Plant_sp~., scales="free", labeller = labeller(Plant_sp = sp.labs)) +
+  scale_x_discrete(breaks=c("1","2","3", "4"),
+        labels=c("High conspecific \nHigh heterospecific", 
+                 "High conspecific \nLow heterospecific", 
+                 "Low conspecific \nHigh heterospecific",
+                 "Low conspecific \nLow heterospecific")) +
+  xlab("Odds of sharing at least one \ninteraction with other plant individuals") +
+  ylab("Predicted plant individual fitness (z-score)") +
+  scale_colour_manual(values=alpha(cols2, 0.8)) + scale_fill_manual(values=alpha(cols2, 0.8)) +
+  theme(axis.text = element_text(size=10), axis.title = element_text(size=15),
+        axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0)),
+        legend.position = "none", panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.text.y = element_blank()) +
+  scale_size_continuous(range = c(2, 6)) +
+  scale_shape_manual(values=c(16, 18))
+
+x.all.plot.w <- ggplot(na.omit(x.all), aes(x=group_w, y=predict, 
+                                   size=(n_int), colour=Plant_sp, fill=Plant_sp)) + 
+  geom_hline(yintercept=0, linetype="dashed", color = "grey30", size=0.3) +
+  geom_boxplot(outlier.shape=NA, width=0.5, position = position_dodge(width=0.5), alpha=0.5) + #geom_text(hjust=0, vjust=0) +
+geom_jitter(width = 0.15, alpha = 0.7) +
+theme_linedraw() + facet_grid(Plant_sp~., scales="free", labeller = labeller(Plant_sp = sp.labs)) +
+  scale_x_discrete(breaks=c("1","2","3", "4"),
+        labels=c("High conspecific \nHigh heterospecific", 
+                 "High conspecific \nLow heterospecific", 
+                 "Low conspecific \nHigh heterospecific",
+                 "Low conspecific \nLow heterospecific")) +
+  xlab("Number of interactions \nshared with other plant individuals") +
+  ylab("Predicted plant individual fitness (z-score)") +
+  scale_colour_manual(values=alpha(cols2, 0.8)) + scale_fill_manual(values=alpha(cols2, 0.8)) +
+  theme(axis.text = element_text(size=10), axis.title = element_text(size=15),
+        axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0)),
+        axis.title.y = element_blank(),
+        legend.position = "none", panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.text.x = element_text(
+        size = 12, color = "black", face = "bold"),
+        strip.text.y = element_text(
+        size = 12, color = "black", face = "italic"),
+        strip.background = element_rect(color="white", fill="white", size=1.5),
+        panel.background = element_rect(fill = alpha('grey50', 0.2))) +
+  scale_size_continuous(range = c(2, 6)) +
+  scale_shape_manual(values=c(16, 18))
+
+x.all.plot.b + x.all.plot.w
+
+
+# Only Lavandula
+selected.plants <- x5 %>% filter(group_b %in% c("1","2") & group_w=="4" & predict > 0) %>% select(Plant_id_1)
+x5 %>% filter(group_w=="4" & predict > 0.1) %>% select(Plant_id_1) %>% c()
+x5 %<>% pivot_longer(group_b:group_w, names_to = "w_b", values_to = "group")
+
+library(ggh4x)
+strip <- strip_themed(background_x = elem_list_rect(fill = c("white", "grey80")))
+labs <- c("Odds of sharing at least one \ninteraction with other plant individuals", 
+          "Number of interactions \nshared with other plant individuals")
+names(labs) <- c("group_b", "group_w")
+
+ggplot(na.omit(x5), aes(x=group, y=predict, 
+                                   size=(n_int))) + 
+  geom_hline(yintercept=0, linetype="dashed", color = "grey30", size=0.5) +
+  geom_boxplot(outlier.shape=NA, width=0.5, position = position_dodge(width=0.5)) + #geom_text(hjust=0, vjust=0) +
+geom_jitter(aes(colour = Plant_id_1 %in% selected.plants$Plant_id_1,
+                shape = Plant_id_1 %in% selected.plants$Plant_id_1),
+            width = 0.15, alpha = 0.7) +
+theme_classic() + facet_wrap2(~w_b, scales="free_y", labeller = labeller(w_b= labs), strip=strip) +
+  scale_colour_manual(name = 'PC1 > 0', 
+                      values = setNames(c('forestgreen','grey50'),c(T, F))) +
+  scale_x_discrete(breaks=c("1","2","3", "4"),
+        labels=c("High conspecific \nHigh heterospecific", 
+                 "High conspecific \nLow heterospecific", 
+                 "Low conspecific \nHigh heterospecific",
+                 "Low conspecific \nLow heterospecific")) +
+  ylab("Predicted plant individual fitness (z-score)") + xlab("") +
+  theme(axis.text = element_text(size=10), axis.title = element_text(size=15),
+        axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0)),
+        legend.position = "none", panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.text.x = element_text(
+        size = 12, color = "black", face = "bold"),
+        strip.background = element_rect(color="grey80", fill="white", size=1)) +
+  scale_size_continuous(range = c(3, 8)) 
+
+```
+
+### all combinations W-B
+
+```{r}
+
+x3 <- x %>% mutate(group= ifelse(
+  con_weighted < median.con.weighted & con_binary > median.con.binary, "1",
+  (ifelse(con_weighted < median.con.weighted & het_binary > median.het.binary, "2",
+         ifelse(het_weighted < median.het.weighted & het_binary > median.het.binary, "3",
+                "4")))))
+
+
+plot.x1 <- ggplot(filter(na.omit(x1), group %in% c("1", "4")), aes(x=group, y=predict, size=(n_int+1))) + geom_hline(yintercept=0, linetype="dashed", 
+                color = "grey30", size=0.5) +
+  geom_boxplot(outlier.shape=NA, width=0.5, fill = "forestgreen",
+               color = "forestgreen", alpha=0.3) +
+geom_jitter(width = 0.05, height = 0.3, alpha = 0.5, color = "forestgreen") +
+theme_linedraw() +
+  scale_x_discrete(breaks=c("1","2","3", "4"),
+        labels=c("High conspecific \nHigh heterospecific", 
+                 "High conspecific \nLow heterospecific", 
+                 "Low conspecific \nHigh heterospecific",
+                 "Low conspecific \nLow heterospecific")) +
+  xlab("Odds of sharing at least one interaction with other plant individuals") +
+  ylab("Predicted plant individual fitness (z-score)") +
+  theme(axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0)),
+        legend.position = "none", panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+ 
+plot.x2 <- ggplot(filter(na.omit(x2), group %in% c("1", "4")), aes(x=group, y=predict, size=(n_int+1))) + geom_hline(yintercept=0, linetype="dashed", 
+                color = "grey30", size=0.5) +
+  geom_boxplot(outlier.shape=NA, width=0.5, fill = "forestgreen",
+               color = "forestgreen", alpha=0.3) +
+geom_jitter(width = 0.05, height = 0.3, alpha = 0.5, color = "forestgreen") +
+theme_linedraw() +
+  scale_x_discrete(breaks=c("1","2","3", "4"),
+        labels=c("High conspecific \nHigh heterospecific", 
+                 "High conspecific \nLow heterospecific", 
+                 "Low conspecific \nHigh heterospecific",
+                 "Low conspecific \nLow heterospecific")) +
+  xlab("Number of interactions shared with other plant individuals") +
+  ylab("Predicted plant individual fitness (z-score)") +
+  theme(axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0)),
+        legend.position = "none", panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+plot.x3 <- ggplot(na.omit(x3), aes(x=group, y=predict, size=(n_int+1))) + geom_hline(yintercept=0, linetype="dashed", 
+                color = "grey30", size=0.5)+
+  geom_boxplot(outlier.shape=NA, width=0.5, fill = "forestgreen",
+               color = "forestgreen", alpha=0.3) +
+geom_jitter(width = 0.05, height = 0.3, alpha = 0.5, color = "forestgreen") +
+theme_linedraw() + 
+  scale_x_discrete(breaks=c("1","2","3", "4"),
+        labels=c("Low conspecific W \nHigh conspecific B", 
+                 "Low conspecific W \nHigh heterospecific B", 
+                 "Low heterospecific W \nHigh heterospecific B",
+                 "Low heterospecific W \nHigh conspecific B")) +
+  #xlab("Odds of sharing at least one interaction with other plant individuals") +
+  xlab("")+
+  ylab("Predicted plant individual fitness (z-score)") +
+  theme(axis.title.x = element_text(margin = margin(t = 15, r = 0, b = 0, l = 0)),
+        legend.position = "none", panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+
+plot.x1 + plot.x2 + plot.x3
+```
+
+# Relative importance of predictors
+
+```{r}
+lm.1.rel <- calc.relimp(lm.all.seeds1)
+lm.2.rel <- calc.relimp(lm.all.seeds2)
+lm.3.rel <- calc.relimp(lm.all.seeds3)
+lm.4.rel <- calc.relimp(lm.all.seeds4)
+lm.5.rel <- calc.relimp(lm.all.seeds5)
+lm.6.rel <- calc.relimp(lm.all.seeds6)
+lm.7.rel <- calc.relimp(lm.all.seeds7)
+lm.8.rel <- calc.relimp(lm.all.seeds8)
+
+rel.impo <- as.data.frame(rbind(lm.1.rel$lmg,
+      lm.2.rel$lmg,
+      lm.3.rel$lmg,
+      lm.4.rel$lmg,
+      lm.5.rel$lmg,
+      lm.6.rel$lmg,
+      lm.7.rel$lmg,
+      lm.8.rel$lmg)) 
+
+rel.impo %<>%
+   mutate(sum = rowSums(across(where(is.numeric)))) %>%
+  mutate_if(is.numeric, ~round(., 2)) %>%
+  mutate(`scale(con_binary)`=`scale(con_binary)`/sum,
+                                                               `scale(het_binary)`=`scale(het_binary)`/sum,
+                                                               `scale(con_weighted)`=`scale(con_weighted)`/sum,
+                                                               `scale(het_weighted)`=`scale(het_weighted)`/sum)
+
+rel.impo %<>% mutate_if(is.numeric, ~round(., 2))
+rel.impo %<>% mutate(Plant_sp=c("AVEL", "CLIB", "HCOM", "HHAL", "LPED", "ROFF", "SGEN", "TMAS"))
+colMeans(rel.impo[sapply(rel.impo, is.numeric)])
+
+sapply(dplyr::select(rel.impo, -Plant_sp), sd)
+
+
+
+# for presentation
+
+ggplot(filter(lm.all, method=="weighted" & Plant_sp=="TMAS")) + 
+  geom_pointrange(mapping=aes(x=Estimate, y=variable, xmin=Estimate-se, xmax=Estimate+se), color="grey50",
+                  size=0.7) + geom_vline(xintercept =0, linetype="dashed", 
+                color = "grey50", size=0.6) + theme_base() + theme(
+   plot.background = element_blank(), 
+   strip.text.x = element_text(face = "italic", size=8),
+   strip.text.y = element_text(face = "bold", size=8),
+   axis.text.x = element_text(size=12, margin = margin(t = 5, r = 0, b = 0, l = 0)),
+   axis.text.y = element_text(size=12, margin = margin(t = 0, r = 5, b = 0, l = 0)),
+   legend.position = "none") +
+   scale_y_discrete(breaks=c("scale(con_weighted)", "scale(het_weighted)"),
+        labels=c("Conspecific",
+                          "Heterospecific")) + 
+  ylab("Pollinator sharing probability")
+```
+
