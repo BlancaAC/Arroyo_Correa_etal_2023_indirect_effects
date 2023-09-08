@@ -58,7 +58,7 @@ plant.info <- read.csv ("Data/individual_plants_id.csv", sep= ";")
 plant.info <- plant.info %>% dplyr::select(Plant_sp, Plant_id, Plot)
 glimpse(plant.info)
 
-plant.traits <- read.csv("Data/Plant_traits/all_plant_traits.csv", sep=",")
+plant.traits <- read.csv("Data/plant_traits.csv", sep=",")
 glimpse(plant.traits)
 
 int.mat <- merge(mat, select(plant.info,Plant_sp, Plant_id), by="Plant_id") %>% filter(!Plant_sp %in% c("UPAR", "CSAL")) %>% droplevels() %>%
@@ -68,7 +68,7 @@ glimpse(int.mat)
 
 ```
 
-## Set palettes
+# Set colour palettes
 
 ```{r}
 
@@ -87,7 +87,7 @@ cols2 <- setNames((cols2$color), cols2$Plant_sp)
 
 ```
 
-## Visitation matrix
+# Visitation matrix
 
 ```{r}
 
@@ -110,19 +110,17 @@ for (i in seq_along(bi.mat.plot)){
 
 ```
 
-## Co-flowering matrix
+# Co-flowering matrix
 
 ```{r}
 
-flowers <- read.csv("Data/synchrony_data_plant_sp.csv")[ ,1:6]
+flowers <- read.csv("Data/flowering_synchrony_plants.csv")[ ,1:6]
 
 flowers %<>% mutate(Prop_flowers= N_flowers/Total_N_flowers) %>% filter(Plant_id %in% c(int.mat$Plant_id))
 #%>% filter(Week %in% c("1", "2")) 
 
 flowers %<>% mutate(Week=as.factor(Week))
 str(flowers)
-
-# using another flowering synchrony index (qualitative)
 
 flowers2 <- flowers %>% select(Plant_id, Week, N_flowers) %>% 
   filter(N_flowers >0) %>% mutate(Week=as.numeric(Week))
@@ -149,6 +147,8 @@ mygraph <- graph.data.frame(select(flowers.comb.sync, Plant_id_1, Plant_id_2, sy
 sync.index <- as.data.frame(get.adjacency(mygraph, sparse = FALSE, attr='synchrony'))
 sync.index %<>% rownames_to_column("Plant_id")
 
+# co-flowering matrix per plot
+
 pheno.mat.plot <- list()
 for (i in levels(as.factor(plant.info$Plot))){
   plot.id <- plant.info %>% filter(Plot== i)
@@ -159,11 +159,11 @@ for (i in levels(as.factor(plant.info$Plot))){
 }
 ```
 
-## Spatial matrix
+# Spatial matrix
 
 ```{r}
 
-plant.xy <- read.csv("Data/coordinates_individual_plants.csv", sep=";") %>% filter(Plant_id %in% c(int.mat$Plant_id))
+plant.xy <- read.csv("Data/coordinates_plants.csv", sep=";") %>% filter(Plant_id %in% c(int.mat$Plant_id))
 
 sf_data <- sf::st_as_sf(x = plant.xy, coords = c("X", "Y"),
                      crs = 3857)
@@ -172,7 +172,7 @@ dist.mat <- sf::st_distance(sf_data, sf_data, ) %>%
   purrr::set_names(nm = plant.xy$Plant_id) %>% 
   bind_cols(tibble(Plant_id = as.character(plant.xy$Plant_id)), . ) %>% as.data.frame()
 
-# spatial matrices per plot
+# spatial matrix per plot
 dist.mat.plot <- list()
 for (i in levels(as.factor(plant.info$Plot))){
   plot.id <- plant.info %>% filter(Plot== i)
@@ -184,7 +184,7 @@ for (i in levels(as.factor(plant.info$Plot))){
 
 ```
 
-# datasets
+# Estimating average pollinator sharing
 
 ```{r}
 
@@ -205,10 +205,14 @@ mean.all %>% dplyr::summarise(mean_all_count=mean(mean_count), sd_all_count=sd(m
 
 ```
 
-# PLOT A
-## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
+# Compute ERGMs
 
 The unipartite projection of matrix A for the P plants contains the parallel minimum of the observed interactions between two individual plants, so that the level of pollinator sharing is driven by the lowest communality in interactions with pollinator species. In this unipartite network, two individual plants are linked if they share at least one interaction with the same pollinator species. 
+
+We modelled the structure of the unipartite plant–plant network as a function of the sum of the link weights (weighted ERGMs) or the density of the network (binary ERGMs) as a structural covariate, the plant species identity and the number of flowers produced as node-based covariates, and the matrices of flowering overlap and spatial distance as dyadic covariates. We performed a binary ERGM and a weighted ERGM for each study plot.
+
+# PLOT A
+## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
 ```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
 
@@ -219,12 +223,6 @@ attr <- uni.mat.plot[[1]] %>% rownames_to_column("Plant_id") %>% left_join(filte
   left_join(select(plant.traits, Plant_id, N_flowers))
 attr %>% group_by(Plant_sp) %>%
   mutate(N_flowers = range01(N_flowers))
-# only conspecific individuals
-
-#attr <- filter(attr, Plant_sp=="HPIC")
-#uni %<>% 
-#    filter(rownames(uni) %in% attr$Plant_id) %>% 
-#    select(any_of(attr$Plant_id)) %>% as.matrix()
 
 # remove column and row names
 colnames(uni)<-NULL
@@ -253,13 +251,10 @@ uni.AA <- get.adjacency(uni.g, attr = "weight") # First separate the igraph obje
 
 uni.v.attrs <- get.data.frame(uni.g, what="vertices")
 
-
 uni.net <- network::as.network(as.matrix(uni.AA),
                              directed=FALSE, ignore.eval=FALSE, names.eval='weight')   # network object for ergm 
 
-
 as.matrix(uni.net,attrname="weight") # We can view the weight attribute as a matrix
-#get.edge.attribute(uni.s, "weight")
 
 
 network::set.vertex.attribute(uni.net, "Plant_id",
@@ -269,7 +264,7 @@ network::set.vertex.attribute(uni.net, "Plant_sp",
 network::set.vertex.attribute(uni.net, "N_flowers",
                                 uni.v.attrs$N_flowers)
 
-# To include the effects of the spatial distance between individual plants on pollinator sharing
+# To include the effects of the spatial and flowering overlap between plant individuals on pollinator sharing
 
 dist <- dist.mat.plot[[1]] 
 dist %<>% select(order(colnames(dist)))
@@ -282,7 +277,7 @@ pheno <- pheno[order(rownames(pheno)),]
 network::set.network.attribute(uni.net, "distance", as.matrix(dist)) # spatial distance between plants as network attribute
 network::get.network.attribute(uni.net, "distance")
 
-network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # spatial distance between plants as network attribute
+network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # flowering overlap between plants as network attribute
 network::get.network.attribute(uni.net, "pheno")
 
 # evaluation of predictor matrices within and between plant species
@@ -300,8 +295,6 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 
 ## Unipartite network: predictor variables for valued ERGMs
 
-We modelled the structure of the unipartite plant–plant network as a function of the sum of the link weights as a structural covariate, and the dissimilarity in intrinsic and extrinsic plant attributes between individuals as node-based covariates. For each plant attribute, the dissimilarity is explicitly measured by the model as the absolute difference in two plants' values for that attribute. By doing so, we aimed to investigate whether individual plants with similar plant attributes shared more pollinator species, potentially leading to assortative mating events.
-
 ```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
 
 
@@ -309,6 +302,7 @@ uni.ergm0 <- formula(uni.net ~ sum)
 
 
 # test main effects of plant traits in sharing pollinators
+# weighted
 uni.ergmA <- formula(uni.net ~ sum 
                      + nodematch("Plant_sp", form= "sum")
                      + nodecov("N_flowers", form= "sum")
@@ -316,7 +310,7 @@ uni.ergmA <- formula(uni.net ~ sum
                      + edgecov("spatial_distance_between", form="sum")
                      + edgecov("fl_overlap_within", form="sum")
                      + edgecov("fl_overlap_between", form="sum"))
-
+# binary
 uni.ergmA.b <- formula(uni.net ~ edges
                      + nodematch("Plant_sp")
                      + nodecov("N_flowers")
@@ -388,8 +382,6 @@ predict.A.summ <- predict.A %>% group_by(Plant_id_1, het_con) %>%
 # PLOT B
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-The unipartite projection of matrix A for the P plants contains the parallel minimum of the observed interactions between two individual plants, so that the level of pollinator sharing is driven by the lowest communality in interactions with pollinator species. In this unipartite network, two individual plants are linked if they share at least one interaction with the same pollinator species. 
-
 ```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[2]]) *100, 0)
@@ -449,7 +441,7 @@ network::set.vertex.attribute(uni.net, "Plant_sp",
 network::set.vertex.attribute(uni.net, "N_flowers",
                                 uni.v.attrs$N_flowers)
 
-# To include the effects of the spatial distance between individual plants on pollinator sharing
+# To include the effects of the spatial and flowering overlap between plant individuals on pollinator sharing
 
 dist <- dist.mat.plot[[2]] 
 dist %<>% select(order(colnames(dist)))
@@ -462,7 +454,7 @@ pheno <- pheno[order(rownames(pheno)),]
 network::set.network.attribute(uni.net, "distance", as.matrix(dist)) # spatial distance between plants as network attribute
 network::get.network.attribute(uni.net, "distance")
 
-network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # spatial distance between plants as network attribute
+network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # flowering overlap between plants as network attribute
 network::get.network.attribute(uni.net, "pheno")
 
 # evaluation of predictor matrices within and between plant species
@@ -479,8 +471,6 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 ```
 
 ## Unipartite network: predictor variables for valued ERGMs
-
-We modelled the structure of the unipartite plant–plant network as a function of the sum of the link weights as a structural covariate, and the dissimilarity in intrinsic and extrinsic plant attributes between individuals as node-based covariates. For each plant attribute, the dissimilarity is explicitly measured by the model as the absolute difference in two plants' values for that attribute. By doing so, we aimed to investigate whether individual plants with similar plant attributes shared more pollinator species, potentially leading to assortative mating events.
 
 ```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
 
@@ -571,8 +561,6 @@ predict.B.summ <- predict.B %>% group_by(Plant_id_1, het_con) %>%
 # PLOT C
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-The unipartite projection of matrix A for the P plants contains the parallel minimum of the observed interactions between two individual plants, so that the level of pollinator sharing is driven by the lowest communality in interactions with pollinator species. In this unipartite network, two individual plants are linked if they share at least one interaction with the same pollinator species. 
-
 ```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[3]]) *1000, 0)
@@ -632,7 +620,7 @@ network::set.vertex.attribute(uni.net, "Plant_sp",
 network::set.vertex.attribute(uni.net, "N_flowers",
                                 uni.v.attrs$N_flowers)
 
-# To include the effects of the spatial distance between individual plants on pollinator sharing
+# To include the effects of the spatial and flowering overlap between plant individuals on pollinator sharing
 
 dist <- dist.mat.plot[[3]] 
 dist %<>% select(order(colnames(dist)))
@@ -645,7 +633,7 @@ pheno <- pheno[order(rownames(pheno)),]
 network::set.network.attribute(uni.net, "distance", as.matrix(dist)) # spatial distance between plants as network attribute
 network::get.network.attribute(uni.net, "distance")
 
-network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # spatial distance between plants as network attribute
+network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # flowering overlap between plants as network attribute
 network::get.network.attribute(uni.net, "pheno")
 
 # evaluation of predictor matrices within and between plant species
@@ -661,8 +649,6 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 ```
 
 ## Unipartite network: predictor variables for valued ERGMs
-
-We modelled the structure of the unipartite plant–plant network as a function of the sum of the link weights as a structural covariate, and the dissimilarity in intrinsic and extrinsic plant attributes between individuals as node-based covariates. For each plant attribute, the dissimilarity is explicitly measured by the model as the absolute difference in two plants' values for that attribute. By doing so, we aimed to investigate whether individual plants with similar plant attributes shared more pollinator species, potentially leading to assortative mating events.
 
 ```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
 
@@ -751,8 +737,6 @@ predict.C.summ <- predict.C %>% group_by(Plant_id_1, het_con) %>%
 # PLOT D
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-The unipartite projection of matrix A for the P plants contains the parallel minimum of the observed interactions between two individual plants, so that the level of pollinator sharing is driven by the lowest communality in interactions with pollinator species. In this unipartite network, two individual plants are linked if they share at least one interaction with the same pollinator species. 
-
 ```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[4]]) *1000, 0)
@@ -812,7 +796,7 @@ network::set.vertex.attribute(uni.net, "Plant_sp",
 network::set.vertex.attribute(uni.net, "N_flowers",
                                 uni.v.attrs$N_flowers)
 
-# To include the effects of the spatial distance between individual plants on pollinator sharing
+# To include the effects of the spatial and flowering overlap between plant individuals on pollinator sharing
 
 dist <- dist.mat.plot[[4]] 
 dist %<>% select(order(colnames(dist)))
@@ -827,7 +811,7 @@ vegan::mantel(as.matrix(pheno), as.matrix(dist))
 network::set.network.attribute(uni.net, "distance", as.matrix(dist)) # spatial distance between plants as network attribute
 network::get.network.attribute(uni.net, "distance")
 
-network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # spatial distance between plants as network attribute
+network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # flowering overlap between plants as network attribute
 network::get.network.attribute(uni.net, "pheno")
 
 # evaluation of predictor matrices within and between plant species
@@ -931,8 +915,6 @@ predict.D.summ <- predict.D %>% group_by(Plant_id_1, het_con) %>%
 # PLOT E
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-The unipartite projection of matrix A for the P plants contains the parallel minimum of the observed interactions between two individual plants, so that the level of pollinator sharing is driven by the lowest communality in interactions with pollinator species. In this unipartite network, two individual plants are linked if they share at least one interaction with the same pollinator species. 
-
 ```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[5]]) *1000, 0)
@@ -993,7 +975,7 @@ network::set.vertex.attribute(uni.net, "Plant_sp",
 network::set.vertex.attribute(uni.net, "N_flowers",
                                 uni.v.attrs$N_flowers)
 
-# To include the effects of the spatial distance between individual plants on pollinator sharing
+# To include the effects of the spatial and flowering overlap between plant individuals on pollinator sharing
 
 dist <- dist.mat.plot[[5]] 
 dist %<>% select(order(colnames(dist)))
@@ -1008,7 +990,7 @@ vegan::mantel(as.matrix(pheno), as.matrix(dist))
 network::set.network.attribute(uni.net, "distance", as.matrix(dist)) # spatial distance between plants as network attribute
 network::get.network.attribute(uni.net, "distance")
 
-network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # spatial distance between plants as network attribute
+network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # flowering overlap between plants as network attribute
 network::get.network.attribute(uni.net, "pheno")
 
 # evaluation of predictor matrices within and between plant species
@@ -1024,8 +1006,6 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 ```
 
 ## Unipartite network: predictor variables for valued ERGMs
-
-We modelled the structure of the unipartite plant–plant network as a function of the sum of the link weights as a structural covariate, and the dissimilarity in intrinsic and extrinsic plant attributes between individuals as node-based covariates. For each plant attribute, the dissimilarity is explicitly measured by the model as the absolute difference in two plants' values for that attribute. By doing so, we aimed to investigate whether individual plants with similar plant attributes shared more pollinator species, potentially leading to assortative mating events.
 
 ```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
 
@@ -1114,8 +1094,6 @@ predict.E.summ <- predict.E %>% group_by(Plant_id_1, het_con) %>%
 # PLOT F
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-The unipartite projection of matrix A for the P plants contains the parallel minimum of the observed interactions between two individual plants, so that the level of pollinator sharing is driven by the lowest communality in interactions with pollinator species. In this unipartite network, two individual plants are linked if they share at least one interaction with the same pollinator species. 
-
 ```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[6]]) *1000, 0)
@@ -1176,7 +1154,7 @@ network::set.vertex.attribute(uni.net, "Plant_sp",
 network::set.vertex.attribute(uni.net, "N_flowers",
                                 uni.v.attrs$N_flowers)
 
-# To include the effects of the spatial distance between individual plants on pollinator sharing
+# To include the effects of the spatial and flowering overlap between plant individuals on pollinator sharing
 
 dist <- dist.mat.plot[[6]] 
 dist %<>% select(order(colnames(dist)))
@@ -1191,7 +1169,7 @@ vegan::mantel(as.matrix(pheno), as.matrix(dist))
 network::set.network.attribute(uni.net, "distance", as.matrix(dist)) # spatial distance between plants as network attribute
 network::get.network.attribute(uni.net, "distance")
 
-network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # spatial distance between plants as network attribute
+network::set.network.attribute(uni.net, "pheno", as.matrix(pheno)) # flowering overlap between plants as network attribute
 network::get.network.attribute(uni.net, "pheno")
 
 # evaluation of predictor matrices within and between plant species
@@ -1207,8 +1185,6 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 ```
 
 ## Unipartite network: predictor variables for valued ERGMs
-
-We modelled the structure of the unipartite plant–plant network as a function of the sum of the link weights as a structural covariate, and the dissimilarity in intrinsic and extrinsic plant attributes between individuals as node-based covariates. For each plant attribute, the dissimilarity is explicitly measured by the model as the absolute difference in two plants' values for that attribute. By doing so, we aimed to investigate whether individual plants with similar plant attributes shared more pollinator species, potentially leading to assortative mating events.
 
 ```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
 
@@ -1298,7 +1274,7 @@ predict.F.summ <- predict.F %>% group_by(Plant_id_1, het_con) %>%
 
 ```{r}
 
-
+### Plot A
 effA <- as.data.frame(coef(summary(uni.ergm.fitA))[1:7,c(1:2)])
 effA$plot <- "A"
 effA$method <- "weighted"
@@ -1319,7 +1295,7 @@ names(effA.b)[3] <- "se"
 effA.b$low.CI <- exp(confint(uni.ergm.fitA.b))[,1]
 effA.b$up.CI <-  exp(confint(uni.ergm.fitA.b))[,2]
 
-###
+### Plot B
 
 effB <- as.data.frame(coef(summary(uni.ergm.fitB))[1:7,c(1:2)])
 effB$plot <- "B"
@@ -1341,7 +1317,7 @@ names(effB.b)[3] <- "se"
 effB.b$low.CI <- exp(confint(uni.ergm.fitB.b))[,1]
 effB.b$up.CI <-  exp(confint(uni.ergm.fitB.b))[,2]
 
-###
+### Plot C
 
 effC <- as.data.frame(coef(summary(uni.ergm.fitC))[1:7,c(1:2)])
 effC$plot <- "C"
@@ -1363,7 +1339,7 @@ names(effC.b)[3] <- "se"
 effC.b$low.CI <- exp(confint(uni.ergm.fitC.b))[,1]
 effC.b$up.CI <-  exp(confint(uni.ergm.fitC.b))[,2]
 
-###
+### Plot D
 
 effD <- as.data.frame(coef(summary(uni.ergm.fitD))[1:7,c(1:2)])
 effD$plot <- "D"
@@ -1385,7 +1361,7 @@ names(effD.b)[3] <- "se"
 effD.b$low.CI <- exp(confint(uni.ergm.fitD.b))[,1]
 effD.b$up.CI <-  exp(confint(uni.ergm.fitD.b))[,2]
 
-###
+### Plot E
 
 effE <- as.data.frame(coef(summary(uni.ergm.fitE))[1:7,c(1:2)])
 effE$plot <- "E"
@@ -1407,7 +1383,7 @@ names(effE.b)[3] <- "se"
 effE.b$low.CI <- exp(confint(uni.ergm.fitE.b))[,1]
 effE.b$up.CI <-  exp(confint(uni.ergm.fitE.b))[,2]
 
-###
+### Plot F
 
 effF <- as.data.frame(coef(summary(uni.ergm.fitF))[1:7,c(1:2)])
 effF$plot <- "F"
@@ -1429,13 +1405,11 @@ names(effF.b)[3] <- "se"
 effF.b$low.CI <- exp(confint(uni.ergm.fitF.b))[,1]
 effF.b$up.CI <-  exp(confint(uni.ergm.fitF.b))[,2]
 
-###
-
+### All plots
 
 eff.all <- rbind(effA, effA.b, effB, effB.b, 
                  effC, effC.b, effD, effD.b, 
                  effE, effE.b, effF, effF.b)
-#eff.all <- rbind(effA, effB, effC, effD,effE, effF)
 
 df <- data.frame(variable  = c("sum", "nodematch.sum.Plant_sp", "nodecov.sum.N_flowers", 
                                 "edgecov.sum.spatial_distance_within", "edgecov.sum.spatial_distance_between",
@@ -1455,8 +1429,7 @@ eff.all %<>% left_join(df, by="variable") %>%
                                 "spatial_distance_within", "spatial_distance_between",
                                 "fl_overlap_within", "fl_overlap_between")))
 
-#eff.all %<>% mutate(Estimate=ifelse(!is.finite(Estimate), -3, Estimate))
-
+# Figure 2
 plot.labs <- c("Plot A", "Plot B", "Plot C", "Plot D", "Plot E", "Plot F")
 names(plot.labs) <- c("A", "B", "C", "D", "E", "F")
 
@@ -1483,14 +1456,24 @@ ggplot(eff.all, aes(x=predictor, y=Estimate, fill=method, group=method)) +
   guides(fill = guide_legend(byrow = TRUE))
 
 
-# Table output
+# Table S1
 
-table.output <-cbind(coef(summary(uni.ergm.fitA.b)),
+table.output.b <-cbind(coef(summary(uni.ergm.fitA.b)),
       coef(summary(uni.ergm.fitB.b)),
       coef(summary(uni.ergm.fitC.b)),
       coef(summary(uni.ergm.fitD.b)),
       coef(summary(uni.ergm.fitE.b)),
       coef(summary(uni.ergm.fitF.b))
+)
+
+# Table S2
+
+table.output.w <-cbind(coef(summary(uni.ergm.fitA)),
+      coef(summary(uni.ergm.fitB)),
+      coef(summary(uni.ergm.fitC)),
+      coef(summary(uni.ergm.fitD)),
+      coef(summary(uni.ergm.fitE)),
+      coef(summary(uni.ergm.fitF))
 )
 
 
@@ -1500,7 +1483,6 @@ table.output <-cbind(coef(summary(uni.ergm.fitA.b)),
 
 ```{r}
 
-# binary
 n.pol <- int.mat %>% mutate(n_pol=rowSums(.!=0))
 predict.all.sum <- rbind(predict.A.summ, predict.B.summ, predict.C.summ, 
                      predict.D.summ, predict.E.summ, predict.F.summ) %>% 
@@ -1519,80 +1501,18 @@ names(sp.labs) <- c("AVEL", "CLIB", "HCOM",
 
 sh.labs <- c("Heterospecific", "Conspecific")
 names(sh.labs) <- c("het", "con")
-
 scaleFUN <- function(x) sprintf("%.0f", x)
 
-b.plot <- ggplot(predict.all.sum, aes(x=(n_pol), y=(mean), color=Plant_sp)) + 
-  scale_x_continuous(labels=scaleFUN) + 
-  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) + 
-  geom_point(alpha=0.5) + 
-  geom_smooth(method = "lm", se = F) + 
-  facet_grid(het_con ~ Plant_sp, 
-  labeller = labeller(Plant_sp = sp.labs, het_con= sh.labs), scales="free_x") +
-  scale_color_manual(values=alpha(cols2, 0.8)) + theme_bw() + theme(
-   strip.background = element_rect(color="white", fill="white", size=1.5), 
-   strip.text.x = element_text(face = "italic", size=12),
-   strip.text.y = element_text(face = "bold", size=12),
-   axis.title.x = element_text(face = "bold", size=12, margin = margin(t = 10, r = 0, b = 0, l = 0)),
-   axis.title.y = element_text(face = "bold", size=12, margin = margin(t = 0, r = 10, b = 0, l = 0)),
-   legend.position = "none") +
-  xlab("Number of pollinator species") + ylab("Probability of sharing \n pollinators with more plants")
 
-
-# weighted
-
-sim.all.sum <- rbind(sim.A.summ, sim.B.summ, sim.C.summ, 
-                     sim.D.summ, sim.E.summ, sim.F.summ) %>% 
-  left_join(select(plant.traits, Plant_id, Plant_sp, Plot), by=c("Plant_id_1"= "Plant_id")) %>% 
-  left_join(select(n.pol, Plant_id, n_pol), by=c("Plant_id_1"= "Plant_id")) %>% 
-  mutate(n_pol=as.integer(n_pol))
-
-glimpse(sim.all.sum)
-
-sp.labs <- c("Armeria \n velutina", "Cistus \n libanotis", "Halimium \n calycinum", 
-               "Halimium \n halimifolium", "Helichrysum \n picardii", "Lavandula \n pedunculata",
-               "Salvia \n rosmarinus", "Stauracanthus \n genistoides","Thymus \n mastichina")
-names(sp.labs) <- c("AVEL", "CLIB", "HCOM",
-                      "HHAL", "HPIC", "LPED",
-                      "ROFF", "SGEN", "TMAS")
-
-sh.labs <- c("Heterospecific", "Conspecific")
-names(sh.labs) <- c("het", "con")
-
-scaleFUN <- function(x) sprintf("%.0f", x)
-
-w.plot <- ggplot(sim.all.sum, aes(x=(n_pol), y=(mean), color=Plant_sp)) + 
-  scale_x_continuous(labels=scaleFUN) + 
-  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) + 
-  geom_point(alpha=0.5) + 
-  geom_smooth(method = "lm", se = F) + 
-  facet_grid(het_con ~ Plant_sp, 
-  labeller = labeller(Plant_sp = sp.labs, het_con= sh.labs), scales="free_x") +
-  scale_color_manual(values=alpha(cols2, 0.8)) + theme_bw() + theme(
-   strip.background = element_rect(color="white", fill="white", size=1.5), 
-   strip.text.x = element_text(face = "italic", size=12),
-   strip.text.y = element_text(face = "bold", size=12),
-   axis.title.x = element_text(face = "bold", size=12, margin = margin(t = 10, r = 0, b = 0, l = 0)),
-   axis.title.y = element_text(face = "bold", size=12, margin = margin(t = 0, r = 10, b = 0, l = 0)),
-   legend.position = "none") +
-  xlab("Number of pollinator species") + ylab("Probability of sharing more \n pollinators with other plants")
-
-
-ggarrange(b.plot, w.plot, ncol = 1, nrow = 2)
-
-
-# het vs con (binary and weighted)
 predict.all.long <- predict.all.sum %>%
   pivot_wider(names_from = het_con, values_from = mean) %>% mutate(method="binary")
 glimpse(predict.all.long)
-
 predict.all.long$het[is.nan(predict.all.long$het)]<-0
 predict.all.long$het[is.na(predict.all.long$het)]<-0
 
 sim.all.long <- sim.all.sum %>%
   pivot_wider(names_from = het_con, values_from = mean) %>% mutate(method="weighted")
 glimpse(sim.all.long)
-
 sim.all.long$het[is.nan(sim.all.long$het)]<-0
 sim.all.long$het[is.na(sim.all.long$het)]<-0
 
@@ -1630,8 +1550,6 @@ mean(predict.all.long$con, na.rm=T)
 sd(predict.all.long$con, na.rm=T)
 mean(predict.all.long$het, na.rm=T)
 sd(predict.all.long$het, na.rm=T)
-
-
 predict.all.long %>% group_by(Plant_sp) %>% 
   summarise(min_con=min(con, na.rm=T),
             max_con=max(con, na.rm=T),
@@ -1677,7 +1595,6 @@ mean(sim.all.long$con, na.rm=T)
 sd(sim.all.long$con, na.rm=T)
 mean(sim.all.long$het, na.rm=T)
 sd(sim.all.long$het, na.rm=T)
-
 sim.all.long %>% group_by(Plant_sp) %>% 
   summarise(min_con=min(con, na.rm=T),
             max_con=max(con, na.rm=T),
@@ -1692,11 +1609,9 @@ sim.all.long %>% group_by(Plant_sp) %>%
             mean_max_het=mean(max_het),
             sd_max_het=sd(max_het))
 
-# combine plots
-library(patchwork)
+# Figure 3
 b.plot / w.plot + plot_layout(guides = "collect")
 
-b.w.plot <- ggarrange(b.plot, w.plot, ncol = 1, nrow = 2)
 
 ## test correlation between conspecific and heterospecific sharing (binary and weighted)
 
@@ -1758,7 +1673,7 @@ tp <- unique(predict.all[,c('method','Plant_sp_1')])
 tp$prob <- 1
 tp$het_con <- "het"
 
-# boxplot
+# Figure S3
 het.con.plot <- ggplot(filter(predict.all, prob<1000), aes(x=het_con, y=(prob), group=het_con, fill=Plant_sp_1, colour=Plant_sp_1)) +
   geom_boxplot(aes(fill=Plant_sp_1), alpha = 0.5, 
                outlier.shape=NA, width=0.1, position= position_nudge(x=-.2)) + 
@@ -1779,9 +1694,6 @@ het.con.plot <- ggplot(filter(predict.all, prob<1000), aes(x=het_con, y=(prob), 
 
 
 
-#ggarrange(het.con.plot, b.w.plot, ncol = 1, nrow = 2)
-
-
 ```
 
 
@@ -1789,19 +1701,13 @@ het.con.plot <- ggplot(filter(predict.all, prob<1000), aes(x=het_con, y=(prob), 
 
 ```{r}
 
-uni <- round((uni.mat.plot[[6]]) *100, 0)
-#uni %<>% select(order(colnames(uni))) %>% as.matrix()
-#temp <- int.mat %>% column_to_rownames("Plant_id") %>% select_if(is.numeric) 
-#uni <- as.data.frame(as.matrix(1-vegdist(bi.mat.plot[[1]], method = "bray")))*100
+# Example for plot A
+uni <- round((uni.mat.plot[[1]]) *100, 0)
 
 # set species as node attributes
 plant.id.sp <- read.csv("Data/individual_plants_id.csv", sep=";")
 plant.id.sp <- plant.id.sp[,c(3,5)]
 plant.int <- left_join(mutate(uni, Plant_id=rownames(uni)), plant.id.sp, by ="Plant_id")
-
-str(plant.int)
-#plant_id_sp$Plant_species <- as.factor(plant_id_sp$Plant_species)
-
 
 # merge species with color
 colors <- data.frame(Plant_sp=names(cols2), color=cols2, row.names=NULL)
@@ -1825,7 +1731,6 @@ E(bipartite.web)$width <- 1
 V(bipartite.web)$color <- c(col.species$color)
 
 
-#l <- layout.graphopt(bipartite.web)
 par(oma=c(0,0,0,0)) # all sides have 3 lines of space
 par(mar=c(0,0,0,0) + 0.1)
 
@@ -1837,9 +1742,6 @@ plot(bipartite.web, vertex.label=NA, vertex.frame.color="white",
 legend("bottomleft", bty = "n",
        legend=colors$Plant_sp,
        col=colors$color, border=NA, cex=0.7, pch=16, pt.cex=1.5)
-
-
-
 
 
 
