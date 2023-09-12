@@ -1,7 +1,7 @@
 ---
-title: "weighted-ERGM"
+title: "Exponential Random Graph Models (ERGM)"
 author: "Blanca Arroyo-Correa"
-date: "8/8/2019"
+date: "12/09/2023"
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -51,7 +51,7 @@ range01 <- function(x){(x-min(x))/(max(x)-min(x))}
 
 # Read interaction data
 
-```{r int.data}
+```{r read.int.data}
 
 mat <- read.csv("Data/complete_interaction_matrix.csv", sep=",")
 plant.info <- read.csv ("Data/individual_plants_id.csv", sep= ";")
@@ -70,7 +70,7 @@ glimpse(int.mat)
 
 # Set colour palettes
 
-```{r}
+```{r colours}
 
 cols <- data.frame(Plant_sp = sort(unique(unique(as.factor(plant.info$Plant_sp)))), 
                    stringsAsFactors = F)
@@ -89,7 +89,7 @@ cols2 <- setNames((cols2$color), cols2$Plant_sp)
 
 # Visitation matrix
 
-```{r}
+```{r visit.mat}
 
 # bipartite matrices per plot
 bi.mat.plot <- list()
@@ -112,12 +112,11 @@ for (i in seq_along(bi.mat.plot)){
 
 # Co-flowering matrix
 
-```{r}
+```{r flowering.mat}
 
 flowers <- read.csv("Data/flowering_synchrony_plants.csv")[ ,1:6]
 
 flowers %<>% mutate(Prop_flowers= N_flowers/Total_N_flowers) %>% filter(Plant_id %in% c(int.mat$Plant_id))
-#%>% filter(Week %in% c("1", "2")) 
 
 flowers %<>% mutate(Week=as.factor(Week))
 str(flowers)
@@ -161,7 +160,7 @@ for (i in levels(as.factor(plant.info$Plot))){
 
 # Spatial matrix
 
-```{r}
+```{r spatial.mat}
 
 plant.xy <- read.csv("Data/coordinates_plants.csv", sep=";") %>% filter(Plant_id %in% c(int.mat$Plant_id))
 
@@ -186,7 +185,7 @@ for (i in levels(as.factor(plant.info$Plot))){
 
 # Estimating average pollinator sharing
 
-```{r}
+```{r average.pol.sharing}
 
 freq.int <- int.mat %>% select(-Plant_sp) %>%
   dplyr::mutate(n_int = rowSums(across(where(is.numeric)), na.rm=TRUE)) %>% select(Plant_id, n_int)
@@ -214,7 +213,7 @@ We modelled the structure of the unipartite plant–plant network as a function 
 # PLOT A
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.graph.A, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[1]]) *100, 0)
 uni %<>% select(order(colnames(uni))) %>% as.matrix()
@@ -232,7 +231,7 @@ rownames(uni)<-NULL
 
 ## Unipartite network: set node attributes in igraph object
 
-```{r uni.nodes, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.nodes.A, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni.g <- graph.adjacency(uni, mode = "undirected", weighted = TRUE, diag = FALSE) # igraph object
 
@@ -244,7 +243,7 @@ V(uni.g)$N_flowers <- attr$N_flowers
 
 ## Unipartite network: set matrices and graphs for model testing (create network object) 
 
-```{r uni.graphs, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.net.A, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.AA <- get.adjacency(uni.g, attr = "weight") # First separate the igraph object into adjacency matrix and plant attributes
@@ -295,7 +294,7 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 
 ## Unipartite network: predictor variables for valued ERGMs
 
-```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.models.A, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.ergm0 <- formula(uni.net ~ sum) 
@@ -324,7 +323,7 @@ uni.ergmA.b <- formula(uni.net ~ edges
 
 ## Unipartite network: compute ERGMs
 
-```{r uni.model.tests, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.model.tests.A, echo=TRUE, message= FALSE, warning= TRUE}
 
 set.seed(42)
 uni.ergm.fitA <- ergm::ergm(uni.ergmA, response ="weight", reference= ~Poisson)   
@@ -382,7 +381,7 @@ predict.A.summ <- predict.A %>% group_by(Plant_id_1, het_con) %>%
 # PLOT B
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.graph.B, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[2]]) *100, 0)
 uni %<>% select(order(colnames(uni))) %>% as.matrix()
@@ -406,7 +405,7 @@ rownames(uni)<-NULL
 
 ## Unipartite network: set node attributes in igraph object
 
-```{r uni.nodes, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.nodes.B, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni.g <- graph.adjacency(uni, mode = "undirected", weighted = TRUE, diag = FALSE) # igraph object
 
@@ -418,7 +417,7 @@ V(uni.g)$N_flowers <- attr$N_flowers
 
 ## Unipartite network: set matrices and graphs for model testing (create network object) 
 
-```{r uni.graphs, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.net.B, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.AA <- get.adjacency(uni.g, attr = "weight") # First separate the igraph object into adjacency matrix and plant attributes
@@ -472,7 +471,7 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 
 ## Unipartite network: predictor variables for valued ERGMs
 
-```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.models.B, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.ergm0 <- formula(uni.net ~ sum) 
@@ -499,7 +498,7 @@ uni.ergmB.b <- formula(uni.net ~ edges
 
 ## Unipartite network: compute ERGMs
 
-```{r uni.model.tests, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.model.tests.B, echo=TRUE, message= FALSE, warning= TRUE}
 
 set.seed(42)
 uni.ergm.fitB <- ergm(uni.ergmB, response ="weight", reference= ~Poisson)   # quantitative
@@ -561,7 +560,7 @@ predict.B.summ <- predict.B %>% group_by(Plant_id_1, het_con) %>%
 # PLOT C
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.graph.C, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[3]]) *1000, 0)
 uni %<>% select(order(colnames(uni))) %>% as.matrix()
@@ -585,7 +584,7 @@ rownames(uni)<-NULL
 
 ## Unipartite network: set node attributes in igraph object
 
-```{r uni.nodes, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.nodes.C, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni.g <- graph.adjacency(uni, mode = "undirected", weighted = TRUE, diag = FALSE) # igraph object
 
@@ -597,7 +596,7 @@ V(uni.g)$N_flowers <- attr$N_flowers
 
 ## Unipartite network: set matrices and graphs for model testing (create network object) 
 
-```{r uni.graphs, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.net.C, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.AA <- get.adjacency(uni.g, attr = "weight") # First separate the igraph object into adjacency matrix and plant attributes
@@ -650,7 +649,7 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 
 ## Unipartite network: predictor variables for valued ERGMs
 
-```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.models.C, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.ergm0 <- formula(uni.net ~ sum) 
@@ -677,7 +676,7 @@ uni.ergmC.b <- formula(uni.net ~ edges
 
 ## Unipartite network: compute ERGMs
 
-```{r uni.model.tests, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.model.tests.C, echo=TRUE, message= FALSE, warning= TRUE}
 
 set.seed(42)
 uni.ergm.fitC <- ergm(uni.ergmC, response ="weight", reference= ~Poisson)   
@@ -737,7 +736,7 @@ predict.C.summ <- predict.C %>% group_by(Plant_id_1, het_con) %>%
 # PLOT D
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.graph.D, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[4]]) *1000, 0)
 uni %<>% select(order(colnames(uni))) %>% as.matrix()
@@ -762,7 +761,7 @@ rownames(uni)<-NULL
 
 ## Unipartite network: set node attributes in igraph object
 
-```{r uni.nodes, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.nodes.D, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni.g <- graph.adjacency(uni, mode = "undirected", weighted = TRUE, diag = FALSE) # igraph object
 
@@ -774,7 +773,7 @@ V(uni.g)$N_flowers <- attr$N_flowers
 
 ## Unipartite network: set matrices and graphs for model testing (create network object) 
 
-```{r uni.graphs, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.net.D, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni.AA <- get.adjacency(uni.g, attr = "weight") # First separate the igraph object into adjacency matrix and plant attributes
 
@@ -828,7 +827,7 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 
 ## Unipartite network: predictor variables for valued ERGMs
 
-```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.models.D, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.ergm0 <- formula(uni.net ~ sum) 
@@ -855,7 +854,7 @@ uni.ergmD.b <- formula(uni.net ~ edges
 
 ## Unipartite network: compute ERGMs
 
-```{r uni.model.tests, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.model.tests.D, echo=TRUE, message= FALSE, warning= TRUE}
 
 set.seed(42)
 uni.ergm.fitD <- ergm(uni.ergmD, response ="weight", reference= ~Poisson)   
@@ -915,7 +914,7 @@ predict.D.summ <- predict.D %>% group_by(Plant_id_1, het_con) %>%
 # PLOT E
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.graph.E, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[5]]) *1000, 0)
 uni %<>% select(order(colnames(uni))) %>% as.matrix()
@@ -940,7 +939,7 @@ rownames(uni)<-NULL
 
 ## Unipartite network: set node attributes in igraph object
 
-```{r uni.nodes, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.nodes.E, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni.g <- graph.adjacency(uni, mode = "undirected", weighted = TRUE, diag = FALSE) # igraph object
 
@@ -952,7 +951,7 @@ V(uni.g)$N_flowers <- attr$N_flowers
 
 ## Unipartite network: set matrices and graphs for model testing (create network object) 
 
-```{r uni.graphs, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.net.E, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.AA <- get.adjacency(uni.g, attr = "weight") # First separate the igraph object into adjacency matrix and plant attributes
@@ -1007,7 +1006,7 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 
 ## Unipartite network: predictor variables for valued ERGMs
 
-```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.models.E, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.ergm0 <- formula(uni.net ~ sum) 
@@ -1034,7 +1033,7 @@ uni.ergmE.b <- formula(uni.net ~ edges
 
 ## Unipartite network: compute ERGMs
 
-```{r uni.model.tests, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.model.tests.E, echo=TRUE, message= FALSE, warning= TRUE}
 
 set.seed(42)
 uni.ergm.fitE <- ergm(uni.ergmE, response ="weight", reference= ~Poisson)   
@@ -1094,7 +1093,7 @@ predict.E.summ <- predict.E %>% group_by(Plant_id_1, het_con) %>%
 # PLOT F
 ## Unipartite network: generate the unipartite projection of the plant-pollinator interaction matrix
 
-```{r uni.graph, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.graph.F, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni <- round((uni.mat.plot[[6]]) *1000, 0)
 uni %<>% select(order(colnames(uni))) %>% as.matrix()
@@ -1119,7 +1118,7 @@ rownames(uni)<-NULL
 
 ## Unipartite network: set node attributes in igraph object
 
-```{r uni.nodes, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.nodes.F, echo=TRUE, message= FALSE, warning= TRUE}
 
 uni.g <- graph.adjacency(uni, mode = "undirected", weighted = TRUE, diag = FALSE) # igraph object
 
@@ -1131,7 +1130,7 @@ V(uni.g)$N_flowers <- attr$N_flowers
 
 ## Unipartite network: set matrices and graphs for model testing (create network object) 
 
-```{r uni.graphs, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.net.F, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.AA <- get.adjacency(uni.g, attr = "weight") # First separate the igraph object into adjacency matrix and plant attributes
@@ -1186,7 +1185,7 @@ uni.net %n% "fl_overlap_between" <- range01(uni.net %n% "pheno" * outer(sp, sp, 
 
 ## Unipartite network: predictor variables for valued ERGMs
 
-```{r uni.models, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.models.F, echo=TRUE, message= FALSE, warning= TRUE}
 
 
 uni.ergm0 <- formula(uni.net ~ sum) 
@@ -1214,7 +1213,7 @@ uni.ergmF.b <- formula(uni.net ~ edges
 
 ## Unipartite network: compute ERGMs
 
-```{r uni.model.tests, echo=TRUE, message= FALSE, warning= TRUE}
+```{r uni.model.tests.F, echo=TRUE, message= FALSE, warning= TRUE}
 
 set.seed(42)
 uni.ergm.fitF <- ergm(uni.ergmF, response ="weight", reference= ~Poisson)   
@@ -1272,7 +1271,7 @@ predict.F.summ <- predict.F %>% group_by(Plant_id_1, het_con) %>%
 
 # Effects plots
 
-```{r}
+```{r effect.plots}
 
 ### Plot A
 effA <- as.data.frame(coef(summary(uni.ergm.fitA))[1:7,c(1:2)])
@@ -1479,9 +1478,9 @@ table.output.w <-cbind(coef(summary(uni.ergm.fitA)),
 
 ```
 
-# Heterospecific vs conspecific pollinator sharing probabilities
+# Heterospecific vs conspecific pollinator sharing probabilities (correlation)
 
-```{r}
+```{r het.con.cor}
 
 n.pol <- int.mat %>% mutate(n_pol=rowSums(.!=0))
 predict.all.sum <- rbind(predict.A.summ, predict.B.summ, predict.C.summ, 
@@ -1639,9 +1638,9 @@ max(test1$het)
 
 ```
 
-# Heterospecific vs conspecific sharing probabilities
+# Heterospecific vs conspecific sharing probabilities (boxplots)
 
-```{r}
+```{r het.con.boxplot}
 
 # binary
 predict.A %<>% mutate(Plot="A", method="binary")
@@ -1699,7 +1698,7 @@ het.con.plot <- ggplot(filter(predict.all, prob<1000), aes(x=het_con, y=(prob), 
 
 # Network plots
 
-```{r}
+```{r net.plots}
 
 # Example for plot A
 uni <- round((uni.mat.plot[[1]]) *100, 0)

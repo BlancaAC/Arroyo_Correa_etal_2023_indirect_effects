@@ -1,7 +1,7 @@
 ---
-title: "weighted-ERGM"
+title: "Fitness analyses"
 author: "Blanca Arroyo-Correa"
-date: "8/8/2019"
+date: "12/09/2023"
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -114,7 +114,7 @@ fitness %<>% full_join(select(plant.traits, Plant_id, N_flowers), by="Plant_id")
 
 # Merge fitness data with ERGM data
 
-```{r}
+```{r merge}
 
 # A
 sim.A.summ.wide <- sim.A.summ %>%
@@ -175,7 +175,7 @@ F.summ.wide <- predict.F.summ %>%
 
 # Fitness ~ weighted + binary model output
 
-```{r}
+```{r models}
 
 w.pred.all <- rbind(sim.A.summ.wide, sim.B.summ.wide, sim.C.summ.wide, 
                     sim.D.summ.wide, sim.E.summ.wide, sim.F.summ.wide)
@@ -286,7 +286,7 @@ tab_model(lm.all.seeds1, lm.all.seeds2, lm.all.seeds3,
 
 # Effects plots
 
-```{r}
+```{r effect.plots}
 
 # Effects plots
 lm1 <- as.data.frame(coef(summary(lm.all.seeds1))[,c(1:2)]) %>% mutate(Plant_sp="AVEL") %>% rownames_to_column("variable")
@@ -390,7 +390,7 @@ first.sp / second.sp + plot_layout(guides = "auto")
 
 # Z-scores fitness vs combinations of pollinator sharing
 
-```{r}
+```{r z.scores.fitness}
 
 # predict fitness for all plant species
 seeds1$predict <- scale(exp(predict(lm.all.seeds1, newdata=seeds1)))
@@ -692,7 +692,7 @@ theme_classic() + facet_wrap2(~w_b, scales="free_y", labeller = labeller(w_b= la
 
 # Relative importance of predictors
 
-```{r}
+```{r rel.importance}
 lm.1.rel <- calc.relimp(lm.all.seeds1)
 lm.2.rel <- calc.relimp(lm.all.seeds2)
 lm.3.rel <- calc.relimp(lm.all.seeds3)
