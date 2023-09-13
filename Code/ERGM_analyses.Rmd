@@ -1437,7 +1437,7 @@ ggplot(eff.all, aes(x=predictor, y=Estimate, fill=method, group=method)) +
       geom_bar(alpha=0.6, stat="identity", width=0.6, position=position_dodge(width = 0.8),
                colour="grey50") +
   geom_linerange(aes(ymin = Estimate-se, ymax = Estimate+se),  position = position_dodge2(width = 0.8), size=0.5, colour="grey50") +
-  facet_wrap(~plot, nrow=2, scales="free_x", labeller = labeller(plot = plot.labs)) + 
+  facet_wrap(~plot, nrow=1, scales="free_x", labeller = labeller(plot = plot.labs)) + 
   theme_classic() + coord_flip() + 
   scale_x_discrete(breaks=c("Baseline", "Plant_sp","N_flowers", "spatial_distance_within", "spatial_distance_between", "fl_overlap_within", "fl_overlap_between"), labels=c("Intercept", "Plant species","Number of flowers", "Conspecific \nspatial distance", "Heterospecific \nspatial distance", "Conspecific \nflowering synchrony", "Heterospecific \nflowering synchrony")) + 
   theme(axis.title.y = element_blank(), panel.spacing.y = unit(8, "lines"), 
