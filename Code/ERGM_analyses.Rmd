@@ -173,6 +173,7 @@ dist.mat <- sf::st_distance(sf_data, sf_data, ) %>%
 
 # spatial matrix per plot
 dist.mat.plot <- list()
+
 for (i in levels(as.factor(plant.info$Plot))){
   plot.id <- plant.info %>% filter(Plot== i)
   temp <- dist.mat %>% 
@@ -181,6 +182,24 @@ for (i in levels(as.factor(plant.info$Plot))){
   dist.mat.plot[[i]] <- temp
 }
 
+distances <- list()
+
+for (i in seq_along(dist.mat.plot)){
+  dist <- data.frame(plot=NA, max_dist=NA, min_dist=NA)
+  dist$plot <- names(dist.mat.plot[i])
+  dist$max_dist <- max(dist.mat.plot[[i]])
+  temp <- c(as.matrix(dist.mat.plot[[i]]))
+  dist$min_dist <- min(temp[temp >0])
+  distances[[i]] <- dist
+}
+
+distances <- do.call("rbind", distances)
+mean(distances$max_dist)
+sd(distances$max_dist)
+mean(distances$min_dist)
+sd(distances$min_dist)
+
+
 ```
 
 # Estimating average pollinator sharing
@@ -188,15 +207,16 @@ for (i in levels(as.factor(plant.info$Plot))){
 ```{r average.pol.sharing}
 
 freq.int <- int.mat %>% select(-Plant_sp) %>%
-  dplyr::mutate(n_int = rowSums(across(where(is.numeric)), na.rm=TRUE)) %>% select(Plant_id, n_int)
+  dplyr::mutate(n_int = rowSums(across(where(is.numeric)), na.rm=TRUE)) %>% select(Plant_id, n_int) %>%
+  mutate(n_int=round(n_int*1000,0))
 
 # mean number of interactions shared (sum) and mean number of plants with shared interactions (count)
-mean.A <- uni.mat.plot[[1]] %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
-mean.B <- uni.mat.plot[[2]] %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
-mean.C <- uni.mat.plot[[3]] %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
-mean.D <- uni.mat.plot[[4]] %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
-mean.E <- uni.mat.plot[[5]] %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
-mean.F <- uni.mat.plot[[6]] %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
+mean.A <- round(uni.mat.plot[[1]]*1000, 0) %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
+mean.B <- round(uni.mat.plot[[2]]*1000, 0) %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
+mean.C <- round(uni.mat.plot[[3]]*1000, 0) %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
+mean.D <- round(uni.mat.plot[[4]]*1000, 0) %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
+mean.E <- round(uni.mat.plot[[5]]*1000, 0) %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
+mean.F <- round(uni.mat.plot[[6]]*1000, 0) %>% mutate(count=rowSums(.!=0), sum=rowSums(.)) %>% select(count, sum) %>% summarise(mean_count=mean(count), mean_sum=mean(sum))
 
 mean.all <- rbind(mean.A, mean.B, mean.C, mean.D, mean.E, mean.F) 
 mean.all %>% dplyr::summarise(mean_all_count=mean(mean_count), sd_all_count=sd(mean_count),
@@ -215,7 +235,7 @@ We modelled the structure of the unipartite plant–plant network as a function 
 
 ```{r uni.graph.A, echo=TRUE, message= FALSE, warning= TRUE}
 
-uni <- round((uni.mat.plot[[1]]) *100, 0)
+uni <- round((uni.mat.plot[[1]]) *1000, 0)
 uni %<>% select(order(colnames(uni))) %>% as.matrix()
 
 attr <- uni.mat.plot[[1]] %>% rownames_to_column("Plant_id") %>% left_join(filter(plant.info, Plot=="A")) %>%
@@ -383,7 +403,7 @@ predict.A.summ <- predict.A %>% group_by(Plant_id_1, het_con) %>%
 
 ```{r uni.graph.B, echo=TRUE, message= FALSE, warning= TRUE}
 
-uni <- round((uni.mat.plot[[2]]) *100, 0)
+uni <- round((uni.mat.plot[[2]]) *1000, 0)
 uni %<>% select(order(colnames(uni))) %>% as.matrix()
 
 attr <- uni.mat.plot[[2]] %>% rownames_to_column("Plant_id") %>% left_join(filter(plant.info, Plot=="B")) %>%
@@ -1444,9 +1464,9 @@ ggplot(eff.all, aes(x=predictor, y=Estimate, fill=method, group=method)) +
         panel.spacing.x = unit(2, "lines"),
         strip.background = element_rect(color="white", fill="white", size=1.5), 
         strip.text = element_text(face = "bold", size=12), 
-        axis.text.x = element_text(size = 10, margin = margin(t = 10, r = 0, b = 0, l = 0)), 
-        axis.text.y = element_text(size = 10, margin = margin(t = 0, r = 10, b = 0, l = 0)), 
-        legend.text = element_text(size = 10), legend.title = element_text(size = 12),
+        axis.text.x = element_text(size = 12, margin = margin(t = 10, r = 0, b = 0, l = 0)), 
+        axis.text.y = element_text(size = 12, margin = margin(t = 0, r = 10, b = 0, l = 0)), 
+        legend.text = element_text(size = 12), legend.title = element_text(size = 12),
         legend.key.size = unit(0.5, "cm"), legend.spacing.y = unit(0.5, 'cm'), legend.position="bottom",
         axis.title=element_text(size=12,face="bold")) + guides(fill = guide_legend(reverse = TRUE), 
                                              colour= guide_legend(reverse = TRUE)) + 
@@ -1489,6 +1509,12 @@ predict.all.sum <- rbind(predict.A.summ, predict.B.summ, predict.C.summ,
   left_join(select(n.pol, Plant_id, n_pol), by=c("Plant_id_1"= "Plant_id")) %>% 
   mutate(n_pol=as.integer(n_pol))
 
+sim.all.sum <- rbind(sim.A.summ, sim.B.summ, sim.C.summ, 
+                     sim.D.summ, sim.E.summ, sim.F.summ) %>% 
+  left_join(select(plant.traits, Plant_id, Plant_sp, Plot), by=c("Plant_id_1"= "Plant_id")) %>% 
+  left_join(select(n.pol, Plant_id, n_pol), by=c("Plant_id_1"= "Plant_id")) %>% 
+  mutate(n_pol=as.integer(n_pol))
+
 glimpse(predict.all.sum)
 
 sp.labs <- c("Armeria \n velutina", "Cistus \n libanotis", "Halimium \n calycinum", 
@@ -1521,7 +1547,7 @@ all.long <- rbind(predict.all.long, sim.all.long)
 # binary
 b.plot <- ggplot(filter(predict.all.long, Plant_sp!="HPIC"), aes(x=(con), y=(het), color=Plant_sp)) + 
   geom_point(alpha=0.7, aes(size=n_int/2)) + 
-  geom_smooth(method = "lm", se=F, linetype = "dashed")+ 
+  #geom_smooth(method = "lm", se=F, linetype = "dashed")+ 
   facet_wrap(~ Plant_sp, nrow=2, scales="free",  
   labeller = labeller(Plant_sp = sp.labs)) + scale_fill_manual(values=alpha(cols2, 0.8)) +
   scale_color_manual(values=alpha(cols2, 0.8),
@@ -1567,7 +1593,7 @@ predict.all.long %>% group_by(Plant_sp) %>%
 # weighted
 w.plot <- ggplot(filter(sim.all.long, Plant_sp!= "HPIC"), aes(x=(con), y=(het), color=Plant_sp)) + 
   geom_point(alpha=0.7, aes(size=n_int/2)) + 
-  geom_smooth(method = "lm", se=F, linetype = "dashed") + 
+  #geom_smooth(method = "lm", se=F, linetype = "dashed") + 
   facet_wrap(~ Plant_sp, nrow=2, scales="free",  
   labeller = labeller(Plant_sp = sp.labs)) + scale_fill_manual(values=alpha(cols2, 0.8)) +
   scale_color_manual(values=alpha(cols2, 0.8), 
@@ -1695,13 +1721,12 @@ het.con.plot <- ggplot(filter(predict.all, prob<1000), aes(x=het_con, y=(prob), 
 
 ```
 
-
 # Network plots
 
 ```{r net.plots}
 
 # Example for plot A
-uni <- round((uni.mat.plot[[1]]) *100, 0)
+uni <- round((uni.mat.plot[[1]]) *1000, 0)
 
 # set species as node attributes
 plant.id.sp <- read.csv("Data/individual_plants_id.csv", sep=";")
@@ -1738,9 +1763,9 @@ plot(bipartite.web, vertex.label=NA, vertex.frame.color="white",
      vertex.color = adjustcolor(V(bipartite.web)$color, alpha.f = .7),
      layout= layout_with_fr(bipartite.web), 
      vertex.size=V(bipartite.web)$size, rescale=T, asp = 1, edge.curved = 0.3)
-legend("bottomleft", bty = "n",
-       legend=colors$Plant_sp,
-       col=colors$color, border=NA, cex=0.7, pch=16, pt.cex=1.5)
+#legend("bottomleft", bty = "n",
+#       legend=colors$Plant_sp,
+#       col=colors$color, border=NA, cex=0.7, pch=16, pt.cex=1.5)
 
 
 
