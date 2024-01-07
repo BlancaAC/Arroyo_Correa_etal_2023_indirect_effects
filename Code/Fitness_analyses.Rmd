@@ -54,61 +54,8 @@ range01 <- function(x){(x-min(x))/(max(x)-min(x))}
 
 ```{r read.fitness.data}
 
-### SEED SET
-seedset_1 <- read.csv("Data/individual_seed_set_Roff_Clib_Hhal_Lped_Tmas.csv", sep=";")
-seedset_2 <- read.csv("Data/individual_seed_set_Sgen_Csal_Hcom.csv", sep=";")
-glimpse(seedset_1)
-glimpse(seedset_2)
-
-seedset_1 %<>% dplyr::select(1:7) %>% 
-  filter(!is.na(N_seeds)) %>% 
-  mutate_if(is.character, list(~na_if(.,""))) %>% 
-  tidyr::fill(c("ID", "Plot", "Plant_sp", "Plant_sp_complete", "Plant_id"), .direction = 'down')
-
-seedset_2 %<>% dplyr::select(1:7) %>% 
-  filter(!is.na(N_seeds)) %>% 
-  mutate_if(is.character, list(~na_if(.,""))) %>% 
-  tidyr::fill(c("ID", "Plot", "Plant_sp", "Plant_sp_complete", "Plant_id"), .direction = 'down')
-
-seedset <- rbind(seedset_1, seedset_2) %>%
-  mutate(N_seeds = as.numeric(N_seeds))
-str(seedset)
-
-seedset %<>% dplyr::select(Plot, Plant_sp, Plant_id, N_fruit, N_seeds) %>%
-  group_by(Plot, Plant_sp, Plant_id) %>%
-  dplyr::summarize(Mean_N_seeds = mean(N_seeds, na.rm=T)) 
-
-### FRUIT SET
-
-fruitset <- read.csv("Data/individual_fruit_set_all.csv", sep=";")
-
-fruitset <- fruitset %>% dplyr::select(Plot, Plant_sp, Plant_id, Branch_inflorescence_id,
-                                  Flowers_produced, Fruits_produced) %>% 
-  mutate(Fruit_set= Fruits_produced/Flowers_produced) %>% 
-  na.omit() %>%
-  group_by(Plot, Plant_sp, Plant_id) %>%
-  dplyr::summarise(Mean_fruit_set = mean(Fruit_set))
-
-fruitset_AVEL <- read.csv("Data/individual_fruit_set_Avel.csv", sep=";")
-fruitset_AVEL %<>% filter(Plant_sp =="AVEL") %>% 
-  mutate(Fruit_set= Seeds_produced/Flowers_produced) %>%
-  group_by(Plot, Plant_sp, Plant_id) %>%
-  dplyr::summarise(Mean_fruit_set = mean(Fruit_set))
-
-fruitset %<>% rbind(fruitset_AVEL)
-
-
-### overall fitness
-
-fitness <- full_join(seedset, fruitset, by=c("Plant_id", "Plot", "Plant_sp")) 
-
-fitness %<>% full_join(dplyr::select(plant.traits, Plant_id, N_flowers), by="Plant_id") %>% 
-  mutate(Mean_N_seeds= ifelse(Plant_sp=="AVEL", Mean_fruit_set, Mean_N_seeds),
-         N_seeds_plant= ifelse(Plant_sp=="AVEL", N_flowers*Mean_fruit_set, N_flowers*Mean_fruit_set*Mean_N_seeds)) %>% na.omit %>% 
-  group_by(Plant_sp) %>% 
-  mutate(N_seeds_sc = range01(N_seeds_plant)) # AVEL number of seeds=number of fruits
-
-#write.csv(fitness, "Data/overall_fitness_plants.csv")
+fitness <- read.csv("Data/individual_plant_overall_fitness.csv") %>% 
+  dplyr::select(-X, -Mean_N_seeds_sc, - N_flowers_sc)
 
 ```
 
@@ -284,6 +231,7 @@ tab_model(lm.all.seeds1, lm.all.seeds2, lm.all.seeds3,
 
 ```
 
+
 # Effects plots
 
 ```{r effect.plots}
@@ -391,8 +339,9 @@ tp3 <- unique((lm.all)[,c('method','Plant_sp')])
 tp3$Estimate <- 1
 tp3$het_con <- "het"
 ggplot((lm.all)) + 
-  geom_pointrange(mapping=aes(x=Estimate, y=variable, xmin=Estimate-se, xmax=Estimate+se, color=Plant_sp),
-                  size=0.05) + geom_vline(xintercept =0, linetype="dashed", 
+  geom_pointrange(mapping=aes(x=exp(Estimate), y=variable, 
+                              xmin=exp(Estimate)-exp(se), xmax=exp(Estimate)+exp(se), color=Plant_sp),
+                  size=0.05) + geom_vline(xintercept =1, linetype="dashed", 
                 color = "grey50", size=0.6) +
   facet_grid(method ~ Plant_sp, 
   labeller = labeller(Plant_sp = sp.labs, method=labs), scales="free_y", space = "free") +
@@ -441,6 +390,9 @@ seeds7$predict <- scale(exp(predict(lm.all.seeds7, newdata=seeds7)))
 seeds8$predict <- scale(exp(predict(lm.all.seeds8, newdata=seeds8)))
 pred.fitness <- rbind(seeds1, seeds2, seeds3, seeds4, seeds5, seeds6, seeds7, seeds8)
 
+# correlation between predicted fitness and fitness
+x <- na.omit(pred.fitness)
+cor(x$N_seeds_sc, x$predict)
 
 con.w.con.b <- ggplot(pred.fitness, aes(con_weighted, con_binary, size=n_int, color=Plant_sp)) + 
   geom_point(alpha=0.7) + 
@@ -493,34 +445,7 @@ het.w.het.b <- ggplot(pred.fitness, aes(het_weighted, het_binary, size=n_int, co
 con.w.con.b / het.w.het.b + plot_layout(guides = "collect")
 
 
-# All correlations
 
-test <- pred.fitness %>% ungroup() %>% dplyr::select(Plant_sp, n_int, N_flowers,
-                        het_weighted, het_binary,
-                        con_weighted, con_binary) %>% mutate_if(is.numeric, log) 
-
-test %>%
-  ggpairs(., 
-               legend = 1, columns=2:7, 
-          columnLabels = c("Number of \ninteractions", "Number of \nflowers",
-                           "Number of shared \ninteractions (heterospecific) ", 
-                           "Odds of sharing \ninteractions (heterospecific) ",
-                           "Number of shared \ninteractions (conspecific) ", 
-                           "Odds of sharing \ninteractions (conspecific) "),
-               mapping = ggplot2::aes(colour=Plant_sp, fill= Plant_sp), 
-               lower = list(continuous = wrap("smooth", se=F,size=0.1))) +
-  theme_base() +
-               theme(legend.position = "right", plot.background = element_blank()) +
-  scale_colour_manual(values=alpha(cols2, 0.8), 
-                       name = "Plant species", labels = c("Armeria \nvelutina", "Cistus \nlibanotis", 
-                                       "Halimium \ncalycinum", "Halimium \nhalimifolium",
-                                       "Lavandula \npedunculata", "Salvia \nrosmarinus", 
-                                       "Stauracanthus \ngenistoides", "Thymus \nmastichina")) + scale_fill_manual(values=alpha(cols2, 0.5),
-                     name = "Plant species", labels = c("Armeria \nvelutina", "Cistus \nlibanotis", 
-                                       "Halimium \ncalycinum", "Halimium \nhalimifolium",
-                                       "Lavandula \npedunculata", "Salvia \nrosmarinus", 
-                                       "Stauracanthus \ngenistoides", "Thymus \nmastichina"))
-###################
 
 ## AVEL
 x1 <- seeds1
@@ -718,6 +643,7 @@ theme_linedraw() + facet_grid(Plant_sp~., scales="free", labeller = labeller(Pla
 x.all.plot.b + x.all.plot.w
 
 
+# Figure 5 new
 result.b <- x.all %>%
   group_by(Plant_sp, group_b) %>%
   summarise(negative_fitness = sum(predict < 0),
@@ -725,41 +651,87 @@ result.b <- x.all %>%
 
 n.ind <- x.all %>% group_by(Plant_sp) %>% na.omit() %>% summarise(count=n()) 
 
-result.b %<>% left_join(n.ind) %>% 
+result.b %<>% left_join(n.ind) %>%
   mutate(negative_fitness= -negative_fitness/count,
          positive_fitness= positive_fitness/count)
+
 result.b <- gather(result.b, fitness, value, 
                    negative_fitness:positive_fitness, factor_key=TRUE)
 
-ggplot(result.b,
-              aes(x=group_b,y=value,group=fitness, fill=Plant_sp))+geom_bar(stat="identity") +
-  facet_grid(.~ Plant_sp) + scale_fill_manual(values=alpha(cols2, 0.8)) +
-theme_linedraw()
+# proportion of individuals with positive and negative fitness within each species
+result.b %>% group_by(Plant_sp, fitness) %>% summarise(sum=sum(value)) %>% 
+  filter(Plant_sp !="LPED") %>% group_by(fitness) %>% summarise(mean=mean(sum), sd=sd(sum))
 
-ggplot(result.b, aes(x = group_b, y = value, group = fitness, fill = Plant_sp, alpha = fitness)) +
+x <- ggplot(result.b, aes(x = group_b, y = value, group = fitness, fill = Plant_sp, alpha = fitness)) +
   geom_bar(stat = "identity") +
-  facet_grid(. ~ Plant_sp) +
+  facet_grid(. ~ Plant_sp, 
+  labeller = labeller(Plant_sp = sp.labs)) +
   scale_fill_manual(values = alpha(cols2, 0.8)) +
   scale_alpha_manual(values = c("negative_fitness" = 0.7, "positive_fitness" = 1)) +
   theme_base() + guides(alpha="none", fill="none") + scale_y_continuous(labels = abs) +
   scale_x_discrete(breaks=c("1","2","3", "4"),
-        labels=c("HC \nHH", 
-                 "HC \nLH", 
-                 "LC \nHH",
-                 "LC \nLH"))
-
+        labels=c("High C \nHigh H", 
+                 "High C \nLow H", 
+                 "Low C \nHigh H",
+                 "Low C \nLow H")) + 
+  ylab("") + xlab("") +
+  theme(axis.text.x = element_text(size=10, angle = -45, vjust = 0.1, hjust = 0.7),
+   plot.background = element_blank(),
+   strip.text.x = element_text(face = "italic", size=14)) +
+  geom_hline(yintercept=c(0,0), linetype="dashed", color="grey20")
 
 result.w <- x.all %>%
   group_by(Plant_sp, group_w) %>%
   summarise(negative_fitness = sum(predict < 0),
             positive_fitness = sum(predict > 0)) %>% na.omit()
 
-# Figure 5
+n.ind <- x.all %>% group_by(Plant_sp) %>% na.omit() %>% summarise(count=n()) 
+
+result.w %<>% left_join(n.ind) %>%
+  mutate(negative_fitness= -negative_fitness/count,
+         positive_fitness= positive_fitness/count)
+
+result.w <- gather(result.w, fitness, value, 
+                   negative_fitness:positive_fitness, factor_key=TRUE)
+
+# proportion of individuals with positive and negative fitness within each species
+result.w %>% group_by(Plant_sp, fitness) %>% summarise(sum=sum(value)) %>% 
+  filter(Plant_sp !="LPED") %>% group_by(fitness) %>% summarise(mean=mean(sum), sd=sd(sum))
+
+
+y <- ggplot(result.w, aes(x = group_w, y = value, group = fitness, fill = Plant_sp, alpha = fitness)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Plant_sp, 
+  labeller = labeller(Plant_sp = sp.labs)) +
+  scale_fill_manual(values = alpha(cols2, 0.8)) +
+  scale_alpha_manual(values = c("negative_fitness" = 0.7, "positive_fitness" = 1)) +
+  theme_base() + guides(alpha="none", fill="none") + scale_y_continuous(labels = abs) +
+  scale_x_discrete(breaks=c("1","2","3", "4"),
+        labels=c("High C \nHigh H", 
+                 "High C \nLow H", 
+                 "Low C \nHigh H",
+                 "Low C \nLow H")) + 
+  ylab("") + xlab("") +
+  theme(panel.background = element_rect(fill = alpha('grey50', 0.2)),
+        axis.text.x = element_text(size=10, angle = -45, vjust = 0.1, hjust = 0.7),
+   plot.background = element_blank(),
+   strip.text.x = element_text(face = "italic", size=14)) +
+  geom_hline(yintercept=c(0,0), linetype="dashed", color="grey20")
+
+x/y  + plot_annotation(tag_levels = 'A')
+###
+
+
+
+
+
+
+# Figure 5 old
 
 selected.plants <- x5 %>% filter(group_b %in% c("1","2") & group_w=="3" & predict > 0) %>% dplyr::select(Plant_id_1)
 
 x5 %>% filter(group_w=="4" & predict > 0.1) %>% dplyr::select(Plant_id_1) %>% c()
-x5 %<>% pivot_longer(group_b:group_w, names_to = "w_b", values_to = "group")
+x5.p <- x5 %>% pivot_longer(group_b:group_w, names_to = "w_b", values_to = "group")
 
 library(ggh4x)
 strip <- strip_themed(background_x = elem_list_rect(fill = c("white", "grey80")))
@@ -767,7 +739,7 @@ labs <- c("Odds of sharing at least one \ninteraction with other plant individua
           "Number of interactions \nshared with other plant individuals")
 names(labs) <- c("group_b", "group_w")
 
-fig5 <- ggplot(na.omit(x5), aes(x=group, y=predict, 
+fig5 <- ggplot(na.omit(x5.p), aes(x=group, y=predict, 
                                    size=(n_int))) + 
   geom_hline(yintercept=0, linetype="dashed", color = "grey30", size=0.5) +
   geom_boxplot(outlier.shape=NA, width=0.5, position = position_dodge(width=0.5)) + #geom_text(hjust=0, vjust=0) +
@@ -794,7 +766,58 @@ theme_classic() + facet_wrap2(~w_b, scales="free_y", labeller = labeller(w_b= la
 
 ```
 
+# Correlation between predictor variables
 
+```{r}
+
+
+vif(lm(N_seeds_sc ~ n_int + het_weighted + het_binary + con_weighted + con_binary,
+       pred.fitness))
+x <- rbind(vif(lm.all.seeds1), 
+      vif(lm.all.seeds2),
+      vif(lm.all.seeds3),
+      vif(lm.all.seeds4),
+      vif(lm.all.seeds5),
+      vif(lm.all.seeds6),
+      vif(lm.all.seeds7),
+      vif(lm.all.seeds8))
+
+x <- glmer(formula = (N_seeds_sc) ~ scale(con_binary) + scale(het_binary) + 
+    scale(con_weighted) + scale(het_weighted) + scale(n_int) + (1|Plant_sp), 
+    family = Gamma(link = log), data = filter(pred.all, N_seeds_sc>0))
+summary(x)
+vif(x)
+
+
+test <- pred.fitness %>% ungroup() %>% dplyr::select(Plant_sp, n_int, N_flowers,
+                        het_weighted, het_binary,
+                        con_weighted, con_binary) %>% mutate_if(is.numeric, log) 
+
+
+test %>%
+  ggpairs(., 
+               legend = 1, columns=2:7, 
+          columnLabels = c("Number of \ninteractions", "Number of \nflowers",
+                           "Number of shared \ninteractions (heterospecific) ", 
+                           "Odds of sharing \ninteractions (heterospecific) ",
+                           "Number of shared \ninteractions (conspecific) ", 
+                           "Odds of sharing \ninteractions (conspecific) "),
+               mapping = ggplot2::aes(colour=Plant_sp, fill= Plant_sp), 
+               lower = list(continuous = wrap("smooth", se=F,size=0.1))) +
+  theme_base() +
+               theme(legend.position = "right", plot.background = element_blank()) +
+  scale_colour_manual(values=alpha(cols2, 0.8), 
+                       name = "Plant species", labels = c("Armeria \nvelutina", "Cistus \nlibanotis", 
+                                       "Halimium \ncalycinum", "Halimium \nhalimifolium",
+                                       "Lavandula \npedunculata", "Salvia \nrosmarinus", 
+                                       "Stauracanthus \ngenistoides", "Thymus \nmastichina")) + scale_fill_manual(values=alpha(cols2, 0.5),
+                     name = "Plant species", labels = c("Armeria \nvelutina", "Cistus \nlibanotis", 
+                                       "Halimium \ncalycinum", "Halimium \nhalimifolium",
+                                       "Lavandula \npedunculata", "Salvia \nrosmarinus", 
+                                       "Stauracanthus \ngenistoides", "Thymus \nmastichina"))
+###################
+
+```
 
 
 # Z-scores fitness vs combinations of pollinator sharing
@@ -914,8 +937,9 @@ result.b <- x.all.simp %>%
             positive_fitness = sum(predict > 0)) %>% na.omit()
 
 result.b %<>% left_join(n.ind) %>% 
-  mutate(negative_fitness= -negative_fitness/count,
-         positive_fitness= positive_fitness/count)
+  mutate(total=rowSums(across(c(negative_fitness, positive_fitness)))) %>%
+  mutate(negative_fitness= -negative_fitness/total,
+         positive_fitness= positive_fitness/total)
 result.b <- gather(result.b, fitness, value, 
                    negative_fitness:positive_fitness, factor_key=TRUE)
 
@@ -936,7 +960,7 @@ x <- ggplot(result.b, aes(x = group_b, y = value, group = fitness, fill = Plant_
                  "Low \nCon", 
                  "High \nHet",
                  "Low \nHet")) + 
-  ylab("Proportion of plant individuals") + xlab("") +
+  ylab("Proportion of \nplant individuals") + xlab("") +
   theme(
    plot.background = element_blank(),
    strip.text.x = element_text(face = "italic", size=14)) +
@@ -956,8 +980,9 @@ result.w <- x.all.simp %>%
             positive_fitness = sum(predict > 0)) %>% na.omit()
 
 result.w %<>% left_join(n.ind) %>% 
-  mutate(negative_fitness= -negative_fitness/count,
-         positive_fitness= positive_fitness/count)
+  mutate(total=rowSums(across(c(negative_fitness, positive_fitness)))) %>%
+  mutate(negative_fitness= -negative_fitness/total,
+         positive_fitness= positive_fitness/total)
 result.w <- gather(result.w, fitness, value, 
                    negative_fitness:positive_fitness, factor_key=TRUE)
 
@@ -974,13 +999,13 @@ y <- ggplot(result.w, aes(x = group_w, y = value, group = fitness, fill = Plant_
                  "High \nHet",
                  "Low \nHet")) + 
   ylab("Proportion of \nplant individuals") + xlab("") +
-  theme(
+  theme(panel.background = element_rect(fill = alpha('grey50', 0.2)),
    plot.background = element_blank(),
    strip.text.x = element_text(face = "italic", size=12)) +
   geom_hline(yintercept=c(0,0), linetype="dashed", color="grey20")
 
 
-x/fig5
+x/y + plot_annotation(tag_levels = 'A')
 
 ```
 
@@ -1033,6 +1058,27 @@ rel.impo %<>% mutate(Plant_sp=c("AVEL", "CLIB", "HCOM", "HHAL", "LPED", "ROFF", 
 colMeans(rel.impo[sapply(rel.impo, is.numeric)])
 
 sapply(dplyr::select(rel.impo, -Plant_sp), sd)
+
+```
+
+# Correlation between predicted fitness and fitness
+
+```{r}
+
+# predict fitness for all plant species
+seeds1$predict <- scale(exp(predict(lm.all.seeds1, newdata=seeds1)))
+seeds2$predict <- scale(exp(predict(lm.all.seeds2, newdata=seeds2)))
+seeds3$predict <- scale(exp(predict(lm.all.seeds3, newdata=seeds3)))
+seeds4$predict <- scale(exp(predict(lm.all.seeds4, newdata=seeds4)))
+seeds5$predict <- scale(exp(predict(lm.all.seeds5, newdata=seeds5)))
+
+seeds6$predict <- scale(exp(predict(lm.all.seeds6, newdata=seeds6)))
+seeds7$predict <- scale(exp(predict(lm.all.seeds7, newdata=seeds7)))
+seeds8$predict <- scale(exp(predict(lm.all.seeds8, newdata=seeds8)))
+pred.fitness <- rbind(seeds1, seeds2, seeds3, seeds4, seeds5, seeds6, seeds7, seeds8)
+
+x <- na.omit(seeds8)
+cor(x$N_seeds_sc, x$predict, method="spearman")
 
 ```
 

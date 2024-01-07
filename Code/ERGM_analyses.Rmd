@@ -1564,8 +1564,8 @@ b.plot <- ggplot(filter(predict.all.long, Plant_sp!="HPIC"), aes(x=(con), y=(het
     plot.background = element_blank(),
     axis.title.x = element_text(size=14, margin = margin(t = 10, r = 0, b = 0, l = 0)),
     axis.title.y = element_text(size=14, margin = margin(t = 0, r = 10, b = 0, l = 0))) +
-  xlab("Odds of sharing at least one interaction with conspecific plant individuals") + 
-  ylab("Odds of sharing at least one interaction \nwith heterospecific plant individuals") + 
+  xlab("Odds of sharing interactions with conspecific plant individuals") + 
+  ylab("Odds of sharing interactions \nwith heterospecific plant individuals") + 
   scale_x_log10() + scale_y_log10() +
   theme(panel.spacing.x = unit(5, "mm")) + guides(size = "none", fill="none")
 
