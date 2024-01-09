@@ -339,9 +339,9 @@ tp3 <- unique((lm.all)[,c('method','Plant_sp')])
 tp3$Estimate <- 1
 tp3$het_con <- "het"
 ggplot((lm.all)) + 
-  geom_pointrange(mapping=aes(x=exp(Estimate), y=variable, 
-                              xmin=exp(Estimate)-exp(se), xmax=exp(Estimate)+exp(se), color=Plant_sp),
-                  size=0.05) + geom_vline(xintercept =1, linetype="dashed", 
+  geom_pointrange(mapping=aes(x=Estimate, y=variable, 
+                              xmin=Estimate-se, xmax=Estimate+se, color=Plant_sp),
+                  size=0.05) + geom_vline(xintercept =0, linetype="dashed", 
                 color = "grey50", size=0.6) +
   facet_grid(method ~ Plant_sp, 
   labeller = labeller(Plant_sp = sp.labs, method=labs), scales="free_y", space = "free") +
@@ -359,7 +359,7 @@ ggplot((lm.all)) +
    strip.text.y = element_blank(),
    #strip.text.y = element_text(face = "bold", size=10),
    #strip.text.x = element_blank(),
-   axis.text.x = element_text(size=10, margin = margin(t = 5, r = 0, b = 0, l = 0)),
+   axis.text.x = element_text(size=7.5, margin = margin(t = 5, r = 0, b = 0, l = 0)),
    axis.text.y = element_text(size=10, margin = margin(t = 0, r = 5, b = 0, l = 0))) +
    scale_y_discrete(breaks=c("(Intercept)", "scale(con_binary)", "scale(het_binary)",
                       "scale(con_weighted)", "scale(het_weighted)", "scale(n_int)"),
